@@ -1,16 +1,20 @@
 package api
 
 import (
-	"github.com/gorilla/mux"
-	"github.com/its-me-ar/go-data-pipeline/internal/api/handler"
+	"github.com/gin-gonic/gin"
+
+	"go-data-pipeline/internal/api/handler"
 )
 
-func NewRouter() *mux.Router {
-	r := mux.NewRouter()
-	api := r.PathPrefix("/api/v1").Subrouter()
+func NewRouter() *gin.Engine {
+	r := gin.Default() // Gin router
 
-	api.HandleFunc("/pipelines", handler.CreatePipeline).Methods("POST")
-	api.HandleFunc("/pipelines", handler.ListPipelines).Methods("GET")
+	// API versioning group
+	api := r.Group("/api/v1")
+	{
+		api.POST("/pipelines", handler.CreatePipeline)
+		api.GET("/pipelines", handler.ListPipelines)
+	}
 
 	return r
 }
