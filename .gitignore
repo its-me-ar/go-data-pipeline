@@ -1,0 +1,25 @@
+# Binaries for programs and plugins
+/bin/
+/tmp/
+/*.exe
+/*.dll
+/*.so
+/*.dylib
+/*.test
+
+# Output of the go coverage tool, specifically when used with LiteIDE
+coverage.out
+
+# Go workspace file
+go.work
+go.work.sum
+
+# Vendor directory
+/vendor/
+
+# IDE files
+.vscode/
+.idea/
+
+# macOS
+.DS_Store
