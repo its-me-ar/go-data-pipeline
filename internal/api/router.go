@@ -1,20 +1,11 @@
 package api
 
 import (
-	"github.com/gin-gonic/gin"
-
 	"go-data-pipeline/internal/api/handler"
+	"go-data-pipeline/pkg/router"
 )
 
-func NewRouter() *gin.Engine {
-	r := gin.Default() // Gin router
-
-	// API versioning group
-	api := r.Group("/api/v1")
-	{
-		api.POST("/pipelines", handler.CreatePipeline)
-		api.GET("/pipelines", handler.ListPipelines)
-	}
-
-	return r
+func RegisterRoutes(r *router.Router) {
+	r.POST("/api/v1/pipelines", handler.CreatePipeline)
+	r.GET("/api/v1/pipelines", handler.ListPipelines)
 }
