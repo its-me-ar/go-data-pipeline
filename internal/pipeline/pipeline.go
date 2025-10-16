@@ -86,6 +86,7 @@ func Run(ctx context.Context, jobID string, job model.PipelineJobSpec) (err erro
 			numWorkers = 3 // default
 		}
 
+		fmt.Printf("🔍 Validation stage: waiting for records from ingestion stage...\n")
 		ValidateRecords(
 			ctx,
 			job.Sources,
@@ -110,6 +111,7 @@ func Run(ctx context.Context, jobID string, job model.PipelineJobSpec) (err erro
 			numWorkers = 2 // default
 		}
 
+		fmt.Printf("🔄 Transform stage: waiting for records from validation stage...\n")
 		TransformRecords(
 			ctx,
 			job.Transformations,
