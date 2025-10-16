@@ -107,12 +107,12 @@ func GetPipelineErrors(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 	prefix := "/api/v1/pipelines/"
 	suffix := "/errors"
-	
+
 	if !strings.HasPrefix(path, prefix) || !strings.HasSuffix(path, suffix) {
 		http.Error(w, "Invalid path", http.StatusBadRequest)
 		return
 	}
-	
+
 	jobID := path[len(prefix) : len(path)-len(suffix)]
 	if jobID == "" {
 		http.Error(w, "Job ID is required", http.StatusBadRequest)
@@ -139,12 +139,12 @@ func GetPipelineResults(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 	prefix := "/api/v1/pipelines/"
 	suffix := "/results"
-	
+
 	if !strings.HasPrefix(path, prefix) || !strings.HasSuffix(path, suffix) {
 		http.Error(w, "Invalid path", http.StatusBadRequest)
 		return
 	}
-	
+
 	jobID := path[len(prefix) : len(path)-len(suffix)]
 	if jobID == "" {
 		http.Error(w, "Job ID is required", http.StatusBadRequest)
@@ -171,12 +171,12 @@ func GetPipelineRecords(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 	prefix := "/api/v1/pipelines/"
 	suffix := "/records"
-	
+
 	if !strings.HasPrefix(path, prefix) || !strings.HasSuffix(path, suffix) {
 		http.Error(w, "Invalid path", http.StatusBadRequest)
 		return
 	}
-	
+
 	jobID := path[len(prefix) : len(path)-len(suffix)]
 	if jobID == "" {
 		http.Error(w, "Job ID is required", http.StatusBadRequest)
@@ -212,12 +212,12 @@ func RetryPipeline(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 	prefix := "/api/v1/pipelines/"
 	suffix := "/retry"
-	
+
 	if !strings.HasPrefix(path, prefix) || !strings.HasSuffix(path, suffix) {
 		http.Error(w, "Invalid path", http.StatusBadRequest)
 		return
 	}
-	
+
 	jobID := path[len(prefix) : len(path)-len(suffix)]
 	if jobID == "" {
 		http.Error(w, "Job ID is required", http.StatusBadRequest)
@@ -254,4 +254,137 @@ func RetryPipeline(w http.ResponseWriter, r *http.Request) {
 		"job_id":  jobID,
 		"status":  "retrying",
 	})
+}
+
+// GET /api/v1/pipelines/{id}/logs
+func GetPipelineLogs(w http.ResponseWriter, r *http.Request) {
+	// Extract job ID from URL path
+	path := r.URL.Path
+	prefix := "/api/v1/pipelines/"
+	suffix := "/logs"
+
+	if !strings.HasPrefix(path, prefix) || !strings.HasSuffix(path, suffix) {
+		http.Error(w, "Invalid path", http.StatusBadRequest)
+		return
+	}
+
+	jobID := path[len(prefix) : len(path)-len(suffix)]
+	if jobID == "" {
+		http.Error(w, "Job ID is required", http.StatusBadRequest)
+		return
+	}
+
+	// Get limit from query parameter
+	limit := 100 // default
+	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+		if parsedLimit, err := strconv.Atoi(limitStr); err == nil && parsedLimit > 0 {
+			limit = parsedLimit
+		}
+	}
+
+	logs, err := store.GetPipelineLogs(jobID, limit)
+	if err != nil {
+		http.Error(w, "Failed to retrieve logs", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"job_id": jobID,
+		"logs":   logs,
+		"count":  len(logs),
+		"limit":  limit,
+	})
+}
+
+// GET /api/v1/pipelines/{id}/metrics
+func GetPipelineMetrics(w http.ResponseWriter, r *http.Request) {
+	// Extract job ID from URL path
+	path := r.URL.Path
+	prefix := "/api/v1/pipelines/"
+	suffix := "/metrics"
+
+	if !strings.HasPrefix(path, prefix) || !strings.HasSuffix(path, suffix) {
+		http.Error(w, "Invalid path", http.StatusBadRequest)
+		return
+	}
+
+	jobID := path[len(prefix) : len(path)-len(suffix)]
+	if jobID == "" {
+		http.Error(w, "Job ID is required", http.StatusBadRequest)
+		return
+	}
+
+	metrics, err := store.GetPipelineMetrics(jobID)
+	if err != nil {
+		http.Error(w, "Failed to retrieve metrics", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"job_id":  jobID,
+		"metrics": metrics,
+		"count":   len(metrics),
+	})
+}
+
+// GET /api/v1/pipelines/{id}/progress
+func GetPipelineProgress(w http.ResponseWriter, r *http.Request) {
+	// Extract job ID from URL path
+	path := r.URL.Path
+	prefix := "/api/v1/pipelines/"
+	suffix := "/progress"
+
+	if !strings.HasPrefix(path, prefix) || !strings.HasSuffix(path, suffix) {
+		http.Error(w, "Invalid path", http.StatusBadRequest)
+		return
+	}
+
+	jobID := path[len(prefix) : len(path)-len(suffix)]
+	if jobID == "" {
+		http.Error(w, "Job ID is required", http.StatusBadRequest)
+		return
+	}
+
+	progress, err := store.GetStageProgress(jobID)
+	if err != nil {
+		http.Error(w, "Failed to retrieve progress", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"job_id":   jobID,
+		"progress": progress,
+		"count":    len(progress),
+	})
+}
+
+// GET /api/v1/pipelines/{id}/summary
+func GetPipelineSummary(w http.ResponseWriter, r *http.Request) {
+	// Extract job ID from URL path
+	path := r.URL.Path
+	prefix := "/api/v1/pipelines/"
+	suffix := "/summary"
+
+	if !strings.HasPrefix(path, prefix) || !strings.HasSuffix(path, suffix) {
+		http.Error(w, "Invalid path", http.StatusBadRequest)
+		return
+	}
+
+	jobID := path[len(prefix) : len(path)-len(suffix)]
+	if jobID == "" {
+		http.Error(w, "Job ID is required", http.StatusBadRequest)
+		return
+	}
+
+	summary, err := store.GetPipelineSummary(jobID)
+	if err != nil {
+		http.Error(w, "Failed to retrieve summary", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(summary)
 }

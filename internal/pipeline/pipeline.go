@@ -57,9 +57,21 @@ func Run(ctx context.Context, jobID string, job model.PipelineJobSpec) (err erro
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		startTime := time.Now()
 		store.UpdateJobStatus(jobID, "ingesting")
+		store.SaveStageProgress(jobID, "ingestion", "started", &startTime, nil, 0, 0)
+		store.SavePipelineLog(jobID, "ingestion", "info", "Starting ingestion stage", map[string]interface{}{
+			"sources_count": len(job.Sources),
+		})
+
 		StartIngestion(ctx, job.Sources, recordsCh, errorCh)
 		close(recordsCh) // safe: only this goroutine closes recordsCh
+
+		endTime := time.Now()
+		store.SaveStageProgress(jobID, "ingestion", "completed", &startTime, &endTime, 0, 0)
+		store.SavePipelineLog(jobID, "ingestion", "info", "Ingestion stage completed", map[string]interface{}{
+			"duration_ms": endTime.Sub(startTime).Milliseconds(),
+		})
 	}()
 
 	// --- VALIDATION STAGE ---
@@ -115,25 +127,44 @@ func Run(ctx context.Context, jobID string, job model.PipelineJobSpec) (err erro
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		startTime := time.Now()
 		fmt.Println("📊 Starting aggregation stage...")
 		store.UpdateJobStatus(jobID, "aggregating")
-		
+		store.SaveStageProgress(jobID, "aggregation", "started", &startTime, nil, 0, 0)
+
 		numWorkers := job.Concurrency.Workers.Aggregation
 		if numWorkers == 0 {
 			numWorkers = 2 // default
 		}
-		
+
+		store.SavePipelineLog(jobID, "aggregation", "info", "Starting aggregation stage", map[string]interface{}{
+			"group_by": job.Aggregation.GroupBy,
+			"metrics":  job.Aggregation.Metrics,
+			"workers":  numWorkers,
+		})
+
 		aggregatedResults := AggregateRecords(ctx, transformedCh, job, numWorkers)
-		
+
 		// Forward aggregated results to the channel
+		resultCount := 0
 		for result := range aggregatedResults {
 			select {
 			case <-ctx.Done():
+				store.SavePipelineLog(jobID, "aggregation", "warning", "Aggregation cancelled", map[string]interface{}{
+					"results_processed": resultCount,
+				})
 				return
 			case aggregatedCh <- result:
+				resultCount++
 			}
 		}
-		
+
+		endTime := time.Now()
+		store.SaveStageProgress(jobID, "aggregation", "completed", &startTime, &endTime, resultCount, 0)
+		store.SavePipelineLog(jobID, "aggregation", "info", "Aggregation stage completed", map[string]interface{}{
+			"results_count": resultCount,
+			"duration_ms":   endTime.Sub(startTime).Milliseconds(),
+		})
 		fmt.Println("✅ Aggregation stage complete.")
 		close(aggregatedCh)
 	}()
@@ -144,21 +175,21 @@ func Run(ctx context.Context, jobID string, job model.PipelineJobSpec) (err erro
 		defer wg.Done()
 		fmt.Println("💾 Starting export stage...")
 		store.UpdateJobStatus(jobID, "exporting")
-		
+
 		exportResults := ExportData(ctx, aggregatedCh, job, jobID)
-		
+
 		// Process export results
 		exportCount := 0
 		for result := range exportResults {
 			exportCount++
 			if result.Success {
-				fmt.Printf("✅ Export %d: %d records exported to %s (%s)\n", 
+				fmt.Printf("✅ Export %d: %d records exported to %s (%s)\n",
 					exportCount, result.RecordCount, result.Path, result.Type)
 			} else {
 				fmt.Printf("❌ Export %d failed: %s\n", exportCount, result.Error)
 			}
 		}
-		
+
 		fmt.Printf("💾 Export Summary: %d export operations completed\n", exportCount)
 	}()
 

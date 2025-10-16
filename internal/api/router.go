@@ -12,6 +12,10 @@ func RegisterRoutes(r *router.Router) {
 	r.GET("/api/v1/pipelines/*/errors", handler.GetPipelineErrors)
 	r.GET("/api/v1/pipelines/*/results", handler.GetPipelineResults)
 	r.GET("/api/v1/pipelines/*/records", handler.GetPipelineRecords)
+	r.GET("/api/v1/pipelines/*/logs", handler.GetPipelineLogs)
+	r.GET("/api/v1/pipelines/*/metrics", handler.GetPipelineMetrics)
+	r.GET("/api/v1/pipelines/*/progress", handler.GetPipelineProgress)
+	r.GET("/api/v1/pipelines/*/summary", handler.GetPipelineSummary)
 	r.POST("/api/v1/pipelines/*/retry", handler.RetryPipeline)
 	// Generic pipeline route last
 	r.GET("/api/v1/pipelines/*", handler.GetPipeline)
