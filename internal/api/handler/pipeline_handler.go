@@ -8,6 +8,7 @@ import (
 	"go-data-pipeline/internal/store"
 	"go-data-pipeline/pkg/utils"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -69,4 +70,31 @@ func ListPipelines(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(jobs)
+}
+
+// GET /api/v1/pipelines/{id}
+func GetPipeline(w http.ResponseWriter, r *http.Request) {
+	// Extract job ID from URL path
+	path := r.URL.Path
+	prefix := "/api/v1/pipelines/"
+
+	if !strings.HasPrefix(path, prefix) {
+		http.Error(w, "Invalid path", http.StatusBadRequest)
+		return
+	}
+
+	jobID := path[len(prefix):]
+	if jobID == "" {
+		http.Error(w, "Job ID is required", http.StatusBadRequest)
+		return
+	}
+
+	job, err := store.GetJob(jobID)
+	if err != nil {
+		http.Error(w, "Job not found", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(job)
 }

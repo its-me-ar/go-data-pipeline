@@ -8,4 +8,5 @@ import (
 func RegisterRoutes(r *router.Router) {
 	r.POST("/api/v1/pipelines", handler.CreatePipeline)
 	r.GET("/api/v1/pipelines", handler.ListPipelines)
+	r.GET("/api/v1/pipelines/*", handler.GetPipeline)
 }

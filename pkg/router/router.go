@@ -3,6 +3,7 @@ package router
 import (
 	"log"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -39,12 +40,32 @@ func New() *Router {
 		key := req.Method + ":" + req.URL.Path
 		if h, ok := r.routes[key]; ok {
 			h(lrw, req)
-		} else if _, pathExists := r.paths[req.URL.Path]; pathExists {
-			// Path exists but method not allowed
-			http.Error(lrw, "Method Not Allowed", http.StatusMethodNotAllowed)
 		} else {
-			// Path not found
-			http.Error(lrw, "Not Found", http.StatusNotFound)
+			// Try to find a wildcard route
+			found := false
+			for routePath := range r.paths {
+				if strings.HasSuffix(routePath, "/*") {
+					prefix := strings.TrimSuffix(routePath, "/*")
+					if strings.HasPrefix(req.URL.Path, prefix+"/") {
+						wildcardKey := req.Method + ":" + routePath
+						if h, ok := r.routes[wildcardKey]; ok {
+							h(lrw, req)
+							found = true
+							break
+						}
+					}
+				}
+			}
+
+			if !found {
+				if _, pathExists := r.paths[req.URL.Path]; pathExists {
+					// Path exists but method not allowed
+					http.Error(lrw, "Method Not Allowed", http.StatusMethodNotAllowed)
+				} else {
+					// Path not found
+					http.Error(lrw, "Not Found", http.StatusNotFound)
+				}
+			}
 		}
 
 		duration := time.Since(start)
@@ -75,6 +96,15 @@ func (r *Router) POST(path string, handler HandlerFunc) { r.register(http.Method
 func (r *Router) PUT(path string, handler HandlerFunc)  { r.register(http.MethodPut, path, handler) }
 func (r *Router) DELETE(path string, handler HandlerFunc) {
 	r.register(http.MethodDelete, path, handler)
+}
+
+// Getter methods for testing
+func (r *Router) Routes() map[string]HandlerFunc {
+	return r.routes
+}
+
+func (r *Router) Paths() map[string]bool {
+	return r.paths
 }
 
 // --- Start server ---

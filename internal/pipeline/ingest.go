@@ -11,10 +11,8 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 )
-
-// GenericRecord is a schema-agnostic map for any data source
-type GenericRecord map[string]interface{}
 
 // ------------------- Ingestion -------------------
 
@@ -35,9 +33,17 @@ func IngestSource(ctx context.Context, source model.Source, out chan<- GenericRe
 
 // StartIngestion starts ingestion for all sources in parallel
 func StartIngestion(ctx context.Context, sources []model.Source, out chan<- GenericRecord, errors chan<- error) {
+	var wg sync.WaitGroup
+
 	for _, src := range sources {
-		go IngestSource(ctx, src, out, errors)
+		wg.Add(1)
+		go func(s model.Source) {
+			defer wg.Done()
+			IngestSource(ctx, s, out, errors)
+		}(src)
 	}
+
+	wg.Wait() // wait for all ingestion goroutines
 }
 
 // ------------------- CSV Ingestion -------------------
@@ -86,10 +92,22 @@ func ingestCSV(ctx context.Context, pathOrURL string, out chan<- GenericRecord, 
 
 			recMap := make(GenericRecord)
 			for i, h := range headers {
-				recMap[h] = utils.ParseValue(record[i])
+				// Clean header names: trim whitespace and remove quotes
+				cleanHeader := strings.TrimSpace(h)
+				cleanHeader = strings.Trim(cleanHeader, `"`)
+				recMap[cleanHeader] = utils.ParseValue(record[i])
 			}
-			out <- recMap
-			recordCount++
+			recMap["SourceURL"] = pathOrURL
+
+			select {
+			case <-ctx.Done():
+				return
+			case out <- recMap:
+				recordCount++
+				if recordCount%50 == 0 || recordCount <= 10 {
+					fmt.Printf("📄 CSV: Processed %d records from %s\n", recordCount, pathOrURL)
+				}
+			}
 		}
 	}
 }
@@ -126,14 +144,28 @@ func ingestJSON(ctx context.Context, url string, out chan<- GenericRecord, error
 				return
 			default:
 				if m, ok := item.(map[string]interface{}); ok {
-					out <- m
-					recordCount++
+					m["SourceURL"] = url
+					select {
+					case <-ctx.Done():
+						return
+					case out <- m:
+						recordCount++
+						if recordCount%10 == 0 || recordCount <= 5 {
+							fmt.Printf("🌐 JSON: Processed %d records from %s\n", recordCount, url)
+						}
+					}
 				}
 			}
 		}
 	case map[string]interface{}:
-		out <- data
-		recordCount++
+		data["SourceURL"] = url
+		select {
+		case <-ctx.Done():
+			return
+		case out <- data:
+			recordCount++
+			fmt.Printf("🌐 JSON: Processed single record from %s\n", url)
+		}
 	default:
 		errors <- fmt.Errorf("unexpected JSON structure")
 		return
