@@ -3,11 +3,13 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"go-data-pipeline/internal/model"
 	"go-data-pipeline/internal/pipeline"
 	"go-data-pipeline/internal/store"
 	"go-data-pipeline/pkg/utils"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -97,4 +99,159 @@ func GetPipeline(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(job)
+}
+
+// GET /api/v1/pipelines/{id}/errors
+func GetPipelineErrors(w http.ResponseWriter, r *http.Request) {
+	// Extract job ID from URL path
+	path := r.URL.Path
+	prefix := "/api/v1/pipelines/"
+	suffix := "/errors"
+	
+	if !strings.HasPrefix(path, prefix) || !strings.HasSuffix(path, suffix) {
+		http.Error(w, "Invalid path", http.StatusBadRequest)
+		return
+	}
+	
+	jobID := path[len(prefix) : len(path)-len(suffix)]
+	if jobID == "" {
+		http.Error(w, "Job ID is required", http.StatusBadRequest)
+		return
+	}
+
+	errors, err := store.GetJobErrors(jobID)
+	if err != nil {
+		http.Error(w, "Failed to retrieve errors", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"job_id": jobID,
+		"errors": errors,
+		"count":  len(errors),
+	})
+}
+
+// GET /api/v1/pipelines/{id}/results
+func GetPipelineResults(w http.ResponseWriter, r *http.Request) {
+	// Extract job ID from URL path
+	path := r.URL.Path
+	prefix := "/api/v1/pipelines/"
+	suffix := "/results"
+	
+	if !strings.HasPrefix(path, prefix) || !strings.HasSuffix(path, suffix) {
+		http.Error(w, "Invalid path", http.StatusBadRequest)
+		return
+	}
+	
+	jobID := path[len(prefix) : len(path)-len(suffix)]
+	if jobID == "" {
+		http.Error(w, "Job ID is required", http.StatusBadRequest)
+		return
+	}
+
+	results, err := store.GetAggregatedResults(jobID)
+	if err != nil {
+		http.Error(w, "Failed to retrieve results", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"job_id":  jobID,
+		"results": results,
+		"count":   len(results),
+	})
+}
+
+// GET /api/v1/pipelines/{id}/records
+func GetPipelineRecords(w http.ResponseWriter, r *http.Request) {
+	// Extract job ID from URL path
+	path := r.URL.Path
+	prefix := "/api/v1/pipelines/"
+	suffix := "/records"
+	
+	if !strings.HasPrefix(path, prefix) || !strings.HasSuffix(path, suffix) {
+		http.Error(w, "Invalid path", http.StatusBadRequest)
+		return
+	}
+	
+	jobID := path[len(prefix) : len(path)-len(suffix)]
+	if jobID == "" {
+		http.Error(w, "Job ID is required", http.StatusBadRequest)
+		return
+	}
+
+	// Get limit from query parameter
+	limit := 100 // default
+	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+		if parsedLimit, err := strconv.Atoi(limitStr); err == nil && parsedLimit > 0 {
+			limit = parsedLimit
+		}
+	}
+
+	records, err := store.GetRawRecords(jobID, limit)
+	if err != nil {
+		http.Error(w, "Failed to retrieve records", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"job_id":  jobID,
+		"records": records,
+		"count":   len(records),
+		"limit":   limit,
+	})
+}
+
+// POST /api/v1/pipelines/{id}/retry
+func RetryPipeline(w http.ResponseWriter, r *http.Request) {
+	// Extract job ID from URL path
+	path := r.URL.Path
+	prefix := "/api/v1/pipelines/"
+	suffix := "/retry"
+	
+	if !strings.HasPrefix(path, prefix) || !strings.HasSuffix(path, suffix) {
+		http.Error(w, "Invalid path", http.StatusBadRequest)
+		return
+	}
+	
+	jobID := path[len(prefix) : len(path)-len(suffix)]
+	if jobID == "" {
+		http.Error(w, "Job ID is required", http.StatusBadRequest)
+		return
+	}
+
+	// Get the job specification
+	jobData, err := store.GetJob(jobID)
+	if err != nil {
+		http.Error(w, "Job not found", http.StatusNotFound)
+		return
+	}
+
+	// Extract job spec
+	spec, ok := jobData["spec"].(model.PipelineJobSpec)
+	if !ok {
+		http.Error(w, "Invalid job specification", http.StatusInternalServerError)
+		return
+	}
+
+	// Start retry in background
+	go func() {
+		err := pipeline.RetryJob(jobID, spec)
+		if err != nil {
+			fmt.Printf("❌ Retry failed for job %s: %v\n", jobID, err)
+		} else {
+			fmt.Printf("✅ Retry successful for job %s\n", jobID)
+		}
+	}()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message": "Retry initiated",
+		"job_id":  jobID,
+		"status":  "retrying",
+	})
 }

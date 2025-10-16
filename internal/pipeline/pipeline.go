@@ -110,42 +110,57 @@ func Run(ctx context.Context, jobID string, job model.PipelineJobSpec) (err erro
 		fmt.Println("✅ Transformation stage setup complete.")
 	}()
 
+	// --- AGGREGATION STAGE ---
+	aggregatedCh := make(chan AggregatedResult, 100)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		fmt.Println("📊 Starting aggregation stage...")
+		store.UpdateJobStatus(jobID, "aggregating")
+		
+		numWorkers := job.Concurrency.Workers.Aggregation
+		if numWorkers == 0 {
+			numWorkers = 2 // default
+		}
+		
+		aggregatedResults := AggregateRecords(ctx, transformedCh, job, numWorkers)
+		
+		// Forward aggregated results to the channel
+		for result := range aggregatedResults {
+			select {
+			case <-ctx.Done():
+				return
+			case aggregatedCh <- result:
+			}
+		}
+		
+		fmt.Println("✅ Aggregation stage complete.")
+		close(aggregatedCh)
+	}()
+
 	// --- EXPORT STAGE ---
-	if job.Export != nil {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			exportCount := 0
-			fmt.Println("💾 Starting export stage...")
-			store.UpdateJobStatus(jobID, "exporting")
-
-			for range transformedCh {
-				// TODO: write to DB or CSV file using job.Export
-				exportCount++
-				if exportCount%100 == 0 || exportCount <= 10 {
-					fmt.Printf("💾 Export: %d records exported\n", exportCount)
-				}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		fmt.Println("💾 Starting export stage...")
+		store.UpdateJobStatus(jobID, "exporting")
+		
+		exportResults := ExportData(ctx, aggregatedCh, job, jobID)
+		
+		// Process export results
+		exportCount := 0
+		for result := range exportResults {
+			exportCount++
+			if result.Success {
+				fmt.Printf("✅ Export %d: %d records exported to %s (%s)\n", 
+					exportCount, result.RecordCount, result.Path, result.Type)
+			} else {
+				fmt.Printf("❌ Export %d failed: %s\n", exportCount, result.Error)
 			}
-			fmt.Printf("💾 Export Summary: %d records exported successfully\n", exportCount)
-		}()
-	} else {
-		// If no export defined, just consume transformedCh
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			consumedCount := 0
-			fmt.Println("📊 Starting data consumption (no export configured)...")
-			store.UpdateJobStatus(jobID, "consuming")
-
-			for range transformedCh {
-				consumedCount++
-				if consumedCount%100 == 0 || consumedCount <= 10 {
-					fmt.Printf("📊 Consumed: %d records processed\n", consumedCount)
-				}
-			}
-			fmt.Printf("📊 Consumption Summary: %d records consumed\n", consumedCount)
-		}()
-	}
+		}
+		
+		fmt.Printf("💾 Export Summary: %d export operations completed\n", exportCount)
+	}()
 
 	// Wait for all stages to finish
 	wg.Wait()

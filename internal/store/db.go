@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"go-data-pipeline/internal/model"
 	"time"
 
@@ -37,11 +38,38 @@ func InitDB(dbPath string) error {
 		created_at DATETIME
 	);
 	`
+	aggregatedResultsTable := `
+	CREATE TABLE IF NOT EXISTS aggregated_results (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		job_id TEXT,
+		group_key TEXT,
+		group_value TEXT,
+		record_count INTEGER,
+		source_url TEXT,
+		metrics TEXT,
+		created_at DATETIME
+	);
+	`
+	rawRecordsTable := `
+	CREATE TABLE IF NOT EXISTS raw_records (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		job_id TEXT,
+		record_data TEXT,
+		source_url TEXT,
+		created_at DATETIME
+	);
+	`
 
 	if _, err := db.Exec(jobTable); err != nil {
 		return err
 	}
 	if _, err := db.Exec(errorTable); err != nil {
+		return err
+	}
+	if _, err := db.Exec(aggregatedResultsTable); err != nil {
+		return err
+	}
+	if _, err := db.Exec(rawRecordsTable); err != nil {
 		return err
 	}
 
@@ -128,4 +156,168 @@ func UpdateJobStatus(jobID string, status string) error {
 	now := time.Now().UTC()
 	_, err := db.Exec(`UPDATE jobs SET status = ?, updated_at = ? WHERE id = ?`, status, now, jobID)
 	return err
+}
+
+// SaveAggregatedResult saves an aggregated result to the database
+func SaveAggregatedResult(jobID string, result interface{}) error {
+	// Convert result to JSON
+	metricsJSON, err := json.Marshal(result)
+	if err != nil {
+		return err
+	}
+	
+	now := time.Now().UTC()
+	_, err = db.Exec(`
+		INSERT INTO aggregated_results (job_id, group_key, group_value, record_count, source_url, metrics, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+	`, jobID, "aggregated", "result", 1, "", string(metricsJSON), now)
+	
+	return err
+}
+
+// SaveRawRecord saves a raw record to the database
+func SaveRawRecord(jobID string, record interface{}) error {
+	// Convert record to JSON
+	recordJSON, err := json.Marshal(record)
+	if err != nil {
+		return err
+	}
+	
+	// Extract source URL if available
+	sourceURL := ""
+	if recordMap, ok := record.(map[string]interface{}); ok {
+		if url, exists := recordMap["SourceURL"]; exists {
+			if urlStr, ok := url.(string); ok {
+				sourceURL = urlStr
+			}
+		}
+	}
+	
+	now := time.Now().UTC()
+	_, err = db.Exec(`
+		INSERT INTO raw_records (job_id, record_data, source_url, created_at)
+		VALUES (?, ?, ?, ?)
+	`, jobID, string(recordJSON), sourceURL, now)
+	
+	return err
+}
+
+// GetAggregatedResults retrieves aggregated results for a job
+func GetAggregatedResults(jobID string) ([]map[string]interface{}, error) {
+	rows, err := db.Query(`
+		SELECT group_key, group_value, record_count, source_url, metrics, created_at
+		FROM aggregated_results
+		WHERE job_id = ?
+		ORDER BY created_at DESC
+	`, jobID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	
+	var results []map[string]interface{}
+	for rows.Next() {
+		var groupKey, groupValue, sourceURL, metricsJSON string
+		var recordCount int
+		var createdAt time.Time
+		
+		err := rows.Scan(&groupKey, &groupValue, &recordCount, &sourceURL, &metricsJSON, &createdAt)
+		if err != nil {
+			return nil, err
+		}
+		
+		// Parse metrics JSON
+		var metrics map[string]interface{}
+		if err := json.Unmarshal([]byte(metricsJSON), &metrics); err != nil {
+			metrics = make(map[string]interface{})
+		}
+		
+		results = append(results, map[string]interface{}{
+			"group_key":    groupKey,
+			"group_value":  groupValue,
+			"record_count": recordCount,
+			"source_url":   sourceURL,
+			"metrics":      metrics,
+			"created_at":   createdAt,
+		})
+	}
+	
+	return results, nil
+}
+
+// GetRawRecords retrieves raw records for a job
+func GetRawRecords(jobID string, limit int) ([]map[string]interface{}, error) {
+	query := `
+		SELECT record_data, source_url, created_at
+		FROM raw_records
+		WHERE job_id = ?
+		ORDER BY created_at DESC
+	`
+	
+	if limit > 0 {
+		query += fmt.Sprintf(" LIMIT %d", limit)
+	}
+	
+	rows, err := db.Query(query, jobID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	
+	var records []map[string]interface{}
+	for rows.Next() {
+		var recordJSON, sourceURL string
+		var createdAt time.Time
+		
+		err := rows.Scan(&recordJSON, &sourceURL, &createdAt)
+		if err != nil {
+			return nil, err
+		}
+		
+		// Parse record JSON
+		var record map[string]interface{}
+		if err := json.Unmarshal([]byte(recordJSON), &record); err != nil {
+			continue // Skip invalid records
+		}
+		
+		records = append(records, map[string]interface{}{
+			"record":     record,
+			"source_url": sourceURL,
+			"created_at": createdAt,
+		})
+	}
+	
+	return records, nil
+}
+
+// GetJobErrors retrieves errors for a job
+func GetJobErrors(jobID string) ([]map[string]interface{}, error) {
+	rows, err := db.Query(`
+		SELECT error_message, created_at
+		FROM job_errors
+		WHERE job_id = ?
+		ORDER BY created_at DESC
+	`, jobID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	
+	var errors []map[string]interface{}
+	for rows.Next() {
+		var errorMessage string
+		var createdAt time.Time
+		
+		err := rows.Scan(&errorMessage, &createdAt)
+		if err != nil {
+			return nil, err
+		}
+		
+		errors = append(errors, map[string]interface{}{
+			"error_message": errorMessage,
+			"created_at":    createdAt,
+		})
+	}
+	
+	return errors, nil
 }
