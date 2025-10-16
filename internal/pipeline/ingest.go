@@ -75,10 +75,14 @@ func ingestCSV(ctx context.Context, pathOrURL string, out chan<- GenericRecord, 
 		return
 	}
 
+	fmt.Printf("📄 CSV Headers: %v\n", headers)
+
 	recordCount := 0
+	fmt.Printf("📄 Starting to read CSV records from %s\n", pathOrURL)
 	for {
 		select {
 		case <-ctx.Done():
+			fmt.Printf("📄 CSV ingestion cancelled after %d records\n", recordCount)
 			return
 		default:
 			record, err := csvReader.Read()
@@ -86,9 +90,12 @@ func ingestCSV(ctx context.Context, pathOrURL string, out chan<- GenericRecord, 
 				fmt.Printf("📄 CSV ingestion done: %d records read from %s\n", recordCount, pathOrURL)
 				return
 			} else if err != nil {
+				fmt.Printf("❌ CSV read error at record %d: %v\n", recordCount+1, err)
 				errors <- fmt.Errorf("CSV read error: %w", err)
 				continue
 			}
+
+			fmt.Printf("📄 Read CSV record %d: %v\n", recordCount+1, record)
 
 			recMap := make(GenericRecord)
 			for i, h := range headers {
@@ -107,6 +114,9 @@ func ingestCSV(ctx context.Context, pathOrURL string, out chan<- GenericRecord, 
 				if recordCount%50 == 0 || recordCount <= 10 {
 					fmt.Printf("📄 CSV: Processed %d records from %s\n", recordCount, pathOrURL)
 				}
+			default:
+				// Channel is full, skip this record
+				fmt.Printf("⚠️ CSV: Channel full, skipping record %d\n", recordCount+1)
 			}
 		}
 	}
