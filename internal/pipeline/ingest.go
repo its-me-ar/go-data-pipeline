@@ -92,9 +92,9 @@ func ingestCSV(ctx context.Context, pathOrURL string, out chan<- GenericRecord, 
 
 			recMap := make(GenericRecord)
 			for i, h := range headers {
-				// Clean header names: trim whitespace and remove quotes
+				// Clean header names: trim whitespace and remove ALL quotes
 				cleanHeader := strings.TrimSpace(h)
-				cleanHeader = strings.Trim(cleanHeader, `"`)
+				cleanHeader = strings.ReplaceAll(cleanHeader, `"`, "") // Remove all quotes
 				recMap[cleanHeader] = utils.ParseValue(record[i])
 			}
 			recMap["SourceURL"] = pathOrURL
