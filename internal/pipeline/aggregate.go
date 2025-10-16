@@ -21,19 +21,19 @@ type AggregatedResult struct {
 
 // AggregationWorker handles aggregation for a specific group
 type AggregationWorker struct {
-	ID           int
-	GroupBy      string
-	Metrics      []string
-	Results      map[string]*AggregatedResult
-	Mutex        sync.RWMutex
-	RecordCount  int
-	ErrorCount   int
+	ID          int
+	GroupBy     string
+	Metrics     []string
+	Results     map[string]*AggregatedResult
+	Mutex       sync.RWMutex
+	RecordCount int
+	ErrorCount  int
 }
 
 // AggregateRecords processes records and performs aggregation based on job configuration
 func AggregateRecords(ctx context.Context, in <-chan GenericRecord, job model.PipelineJobSpec, workerCount int) <-chan AggregatedResult {
 	out := make(chan AggregatedResult, 100)
-	
+
 	// If no aggregation config, just pass through records as individual results
 	if job.Aggregation == nil {
 		go func() {
@@ -64,6 +64,9 @@ func AggregateRecords(ctx context.Context, in <-chan GenericRecord, job model.Pi
 	}
 
 	// Create aggregation workers
+	fmt.Printf("📊 Aggregation config: GroupBy='%s', Metrics=%v, Workers=%d\n",
+		job.Aggregation.GroupBy, job.Aggregation.Metrics, workerCount)
+
 	workers := make([]*AggregationWorker, workerCount)
 	for i := 0; i < workerCount; i++ {
 		workers[i] = &AggregationWorker{
@@ -77,11 +80,11 @@ func AggregateRecords(ctx context.Context, in <-chan GenericRecord, job model.Pi
 	// Distribute records to workers
 	var wg sync.WaitGroup
 	wg.Add(workerCount)
-	
+
 	for i := 0; i < workerCount; i++ {
 		go func(worker *AggregationWorker) {
 			defer wg.Done()
-			
+
 			for rec := range in {
 				select {
 				case <-ctx.Done():
@@ -89,13 +92,13 @@ func AggregateRecords(ctx context.Context, in <-chan GenericRecord, job model.Pi
 				default:
 					worker.processRecord(rec)
 					worker.RecordCount++
-					
+
 					if worker.RecordCount%100 == 0 || worker.RecordCount <= 10 {
 						fmt.Printf("📊 Aggregation Worker %d: Processed %d records\n", worker.ID, worker.RecordCount)
 					}
 				}
 			}
-			
+
 			fmt.Printf("📊 Aggregation Worker %d completed: %d records, %d errors\n", worker.ID, worker.RecordCount, worker.ErrorCount)
 		}(workers[i])
 	}
@@ -103,12 +106,12 @@ func AggregateRecords(ctx context.Context, in <-chan GenericRecord, job model.Pi
 	// Collect results from all workers
 	go func() {
 		wg.Wait()
-		
+
 		// Merge results from all workers
 		finalResults := make(map[string]*AggregatedResult)
 		totalRecords := 0
 		totalErrors := 0
-		
+
 		for _, worker := range workers {
 			worker.Mutex.RLock()
 			for key, result := range worker.Results {
@@ -130,7 +133,7 @@ func AggregateRecords(ctx context.Context, in <-chan GenericRecord, job model.Pi
 			totalErrors += worker.ErrorCount
 			worker.Mutex.RUnlock()
 		}
-		
+
 		// Send results to output channel
 		resultCount := 0
 		for _, result := range finalResults {
@@ -141,7 +144,7 @@ func AggregateRecords(ctx context.Context, in <-chan GenericRecord, job model.Pi
 				resultCount++
 			}
 		}
-		
+
 		fmt.Printf("📊 Aggregation Summary: %d groups created from %d records, %d errors\n", resultCount, totalRecords, totalErrors)
 		close(out)
 	}()
@@ -155,14 +158,18 @@ func (w *AggregationWorker) processRecord(rec GenericRecord) {
 	groupValue, exists := rec[w.GroupBy]
 	if !exists {
 		w.ErrorCount++
+		if w.ErrorCount <= 5 { // Log first few errors
+			fmt.Printf("❌ Aggregation Worker %d: Field '%s' not found in record. Available fields: %v\n",
+				w.ID, w.GroupBy, getRecordKeys(rec))
+		}
 		return
 	}
-	
+
 	groupKey := fmt.Sprintf("%v", groupValue)
-	
+
 	w.Mutex.Lock()
 	defer w.Mutex.Unlock()
-	
+
 	// Get or create aggregation result for this group
 	result, exists := w.Results[groupKey]
 	if !exists {
@@ -174,12 +181,12 @@ func (w *AggregationWorker) processRecord(rec GenericRecord) {
 		}
 		w.Results[groupKey] = result
 	}
-	
+
 	// Update metrics
 	for _, metric := range w.Metrics {
 		updateMetric(result, rec, metric)
 	}
-	
+
 	result.RecordCount++
 }
 
@@ -231,7 +238,7 @@ func updateAverageMetric(result *AggregatedResult, rec GenericRecord) {
 			if num, ok := convertToFloat(value); ok {
 				sumKey := "sum_" + key
 				countKey := "count_" + key
-				
+
 				// Update sum
 				if existing, exists := result.Metrics[sumKey]; exists {
 					if existingNum, ok := convertToFloat(existing); ok {
@@ -240,7 +247,7 @@ func updateAverageMetric(result *AggregatedResult, rec GenericRecord) {
 				} else {
 					result.Metrics[sumKey] = num
 				}
-				
+
 				// Update count
 				if existing, exists := result.Metrics[countKey]; exists {
 					if count, ok := existing.(int); ok {
@@ -249,7 +256,7 @@ func updateAverageMetric(result *AggregatedResult, rec GenericRecord) {
 				} else {
 					result.Metrics[countKey] = 1
 				}
-				
+
 				// Calculate average
 				if sum, ok := convertToFloat(result.Metrics[sumKey]); ok {
 					if count, ok := result.Metrics[countKey].(int); ok && count > 0 {
@@ -360,6 +367,14 @@ func getSourceURL(rec GenericRecord) string {
 	return ""
 }
 
+func getRecordKeys(rec GenericRecord) []string {
+	keys := make([]string, 0, len(rec))
+	for key := range rec {
+		keys = append(keys, key)
+	}
+	return keys
+}
+
 func isNumericField(key string, value interface{}) bool {
 	// Skip certain fields that shouldn't be aggregated
 	skipFields := []string{"SourceURL", "_processed_at", "_pipeline_version", "_record_id"}
@@ -368,12 +383,12 @@ func isNumericField(key string, value interface{}) bool {
 			return false
 		}
 	}
-	
+
 	// Check if value is numeric
 	_, isInt := value.(int)
 	_, isFloat := value.(float64)
 	_, isFloat32 := value.(float32)
-	
+
 	return isInt || isFloat || isFloat32
 }
 
@@ -402,7 +417,7 @@ func mergeMetricValues(existing, new interface{}, metric string) interface{} {
 			}
 		}
 	}
-	
+
 	// For count metrics, add counts
 	if strings.HasPrefix(metric, "count_") {
 		if existingCount, ok := existing.(int); ok {
@@ -411,7 +426,7 @@ func mergeMetricValues(existing, new interface{}, metric string) interface{} {
 			}
 		}
 	}
-	
+
 	// For min metrics, take minimum
 	if strings.HasPrefix(metric, "min_") {
 		if existingNum, ok := convertToFloat(existing); ok {
@@ -423,7 +438,7 @@ func mergeMetricValues(existing, new interface{}, metric string) interface{} {
 			}
 		}
 	}
-	
+
 	// For max metrics, take maximum
 	if strings.HasPrefix(metric, "max_") {
 		if existingNum, ok := convertToFloat(existing); ok {
@@ -435,7 +450,7 @@ func mergeMetricValues(existing, new interface{}, metric string) interface{} {
 			}
 		}
 	}
-	
+
 	// For other metrics, return the new value
 	return new
 }
@@ -444,7 +459,7 @@ func mergeMetricValues(existing, new interface{}, metric string) interface{} {
 func SortAggregatedResults(results []AggregatedResult, sortBy string, ascending bool) []AggregatedResult {
 	sort.Slice(results, func(i, j int) bool {
 		var iVal, jVal interface{}
-		
+
 		switch sortBy {
 		case "group_value":
 			iVal = results[i].GroupValue
@@ -465,27 +480,27 @@ func SortAggregatedResults(results []AggregatedResult, sortBy string, ascending 
 				jVal = results[j].GroupValue
 			}
 		}
-		
+
 		// Convert to comparable values
 		iFloat, iOk := convertToFloat(iVal)
 		jFloat, jOk := convertToFloat(jVal)
-		
+
 		if iOk && jOk {
 			if ascending {
 				return iFloat < jFloat
 			}
 			return iFloat > jFloat
 		}
-		
+
 		// String comparison
 		iStr := fmt.Sprintf("%v", iVal)
 		jStr := fmt.Sprintf("%v", jVal)
-		
+
 		if ascending {
 			return iStr < jStr
 		}
 		return iStr > jStr
 	})
-	
+
 	return results
 }
