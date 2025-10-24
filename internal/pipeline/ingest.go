@@ -6,15 +6,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"go-data-pipeline/internal/model"
+	"go-data-pipeline/internal/store"
 	"go-data-pipeline/pkg/utils"
 	"io"
 	"net/http"
 	"os"
 	"strings"
+	"sync"
+	"time"
 )
-
-// GenericRecord is a schema-agnostic map for any data source
-type GenericRecord map[string]interface{}
 
 // ------------------- Ingestion -------------------
 
@@ -35,9 +35,17 @@ func IngestSource(ctx context.Context, source model.Source, out chan<- GenericRe
 
 // StartIngestion starts ingestion for all sources in parallel
 func StartIngestion(ctx context.Context, sources []model.Source, out chan<- GenericRecord, errors chan<- error) {
+	var wg sync.WaitGroup
+
 	for _, src := range sources {
-		go IngestSource(ctx, src, out, errors)
+		wg.Add(1)
+		go func(s model.Source) {
+			defer wg.Done()
+			IngestSource(ctx, s, out, errors)
+		}(src)
 	}
+
+	wg.Wait() // wait for all ingestion goroutines
 }
 
 // ------------------- CSV Ingestion -------------------
@@ -69,10 +77,14 @@ func ingestCSV(ctx context.Context, pathOrURL string, out chan<- GenericRecord, 
 		return
 	}
 
+	fmt.Printf("📄 CSV Headers: %v\n", headers)
+
 	recordCount := 0
+	fmt.Printf("📄 Starting to read CSV records from %s\n", pathOrURL)
 	for {
 		select {
 		case <-ctx.Done():
+			fmt.Printf("📄 CSV ingestion cancelled after %d records\n", recordCount)
 			return
 		default:
 			record, err := csvReader.Read()
@@ -80,16 +92,34 @@ func ingestCSV(ctx context.Context, pathOrURL string, out chan<- GenericRecord, 
 				fmt.Printf("📄 CSV ingestion done: %d records read from %s\n", recordCount, pathOrURL)
 				return
 			} else if err != nil {
+				fmt.Printf("❌ CSV read error at record %d: %v\n", recordCount+1, err)
 				errors <- fmt.Errorf("CSV read error: %w", err)
 				continue
 			}
 
+			fmt.Printf("📄 Read CSV record %d: %v\n", recordCount+1, record)
+
 			recMap := make(GenericRecord)
 			for i, h := range headers {
-				recMap[h] = utils.ParseValue(record[i])
+				// Clean header names: trim whitespace and remove ALL quotes
+				cleanHeader := strings.TrimSpace(h)
+				cleanHeader = strings.ReplaceAll(cleanHeader, `"`, "") // Remove all quotes
+				recMap[cleanHeader] = utils.ParseValue(record[i])
 			}
-			out <- recMap
-			recordCount++
+			recMap["SourceURL"] = pathOrURL
+
+			select {
+			case <-ctx.Done():
+				return
+			case out <- recMap:
+				recordCount++
+				if recordCount%50 == 0 || recordCount <= 10 {
+					fmt.Printf("📄 CSV: Processed %d records from %s\n", recordCount, pathOrURL)
+				}
+			default:
+				// Channel is full, skip this record
+				fmt.Printf("⚠️ CSV: Channel full, skipping record %d\n", recordCount+1)
+			}
 		}
 	}
 }
@@ -126,18 +156,56 @@ func ingestJSON(ctx context.Context, url string, out chan<- GenericRecord, error
 				return
 			default:
 				if m, ok := item.(map[string]interface{}); ok {
-					out <- m
-					recordCount++
+					m["SourceURL"] = url
+					select {
+					case <-ctx.Done():
+						return
+					case out <- m:
+						recordCount++
+						if recordCount%10 == 0 || recordCount <= 5 {
+							fmt.Printf("🌐 JSON: Processed %d records from %s\n", recordCount, url)
+						}
+					}
 				}
 			}
 		}
 	case map[string]interface{}:
-		out <- data
-		recordCount++
+		data["SourceURL"] = url
+		select {
+		case <-ctx.Done():
+			return
+		case out <- data:
+			recordCount++
+			fmt.Printf("🌐 JSON: Processed single record from %s\n", url)
+		}
 	default:
 		errors <- fmt.Errorf("unexpected JSON structure")
 		return
 	}
 
 	fmt.Printf("🌐 JSON ingestion done: %d records read from %s\n", recordCount, url)
+}
+
+// ------------------- Stage Execution -------------------
+
+// ExecuteIngestionStage executes the complete ingestion stage with tracking
+func ExecuteIngestionStage(ctx context.Context, jobID string, job model.PipelineJobSpec, out chan<- GenericRecord, errors chan<- error, tracker interface{}) {
+	startTime := time.Now()
+	store.UpdateJobStatus(jobID, "ingesting")
+	// tracker.StartStage("ingestion", len(job.Sources))
+
+	store.SaveStageProgress(jobID, "ingestion", "started", &startTime, nil, 0, 0)
+	store.SavePipelineLog(jobID, "ingestion", "info", "Starting ingestion stage", map[string]interface{}{
+		"sources_count": len(job.Sources),
+	})
+
+	// Execute ingestion using the existing function
+	StartIngestion(ctx, job.Sources, out, errors)
+
+	endTime := time.Now()
+	// tracker.EndStage("ingestion", 0) // Record count will be updated by individual sources
+	store.SaveStageProgress(jobID, "ingestion", "completed", &startTime, &endTime, 0, 0)
+	store.SavePipelineLog(jobID, "ingestion", "info", "Ingestion stage completed", map[string]interface{}{
+		"duration_ms": endTime.Sub(startTime).Milliseconds(),
+	})
 }

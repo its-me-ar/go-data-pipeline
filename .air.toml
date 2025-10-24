@@ -7,6 +7,9 @@ root = "."
 tmp_dir = "tmp"
 
 [build]
+  # Pre-build command: regenerate Swagger docs before building
+  pre_cmd = ["swag init -g cmd/pipeline/main.go -o docs --parseDependency --parseInternal"]
+  
   # Build command: compile the app from ./cmd/pipeline
   cmd = "go build -o ./tmp/pipeline ./cmd/pipeline"
   
@@ -17,7 +20,7 @@ tmp_dir = "tmp"
   include_ext = ["go", "tpl", "tmpl", "html", "json", "yaml"]
   
   # Directories to ignore (to prevent rebuild loops)
-  exclude_dir = ["assets", "tmp", "vendor"]
+  exclude_dir = ["assets", "tmp", "vendor", "docs"]
 
   # Optional: wait for 1 second before rebuilding (useful if saving many files at once)
   delay = 1000

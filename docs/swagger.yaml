@@ -1,0 +1,484 @@
+basePath: /api/v1
+definitions:
+  go-data-pipeline_internal_model.Aggregation:
+    properties:
+      groupBy:
+        type: string
+      metrics:
+        description: e.g., ["sum", "avg", "count"]
+        items:
+          type: string
+        type: array
+    type: object
+  go-data-pipeline_internal_model.ConcurrencyConfig:
+    properties:
+      apiRetry:
+        type: integer
+      channelBufferSize:
+        type: integer
+      jobTimeout:
+        description: e.g., "5m"
+        type: string
+      workers:
+        $ref: '#/definitions/go-data-pipeline_internal_model.Workers'
+    type: object
+  go-data-pipeline_internal_model.Export:
+    properties:
+      batchSize:
+        description: optional batch size
+        type: integer
+      db:
+        description: e.g., postgres, sqlite
+        type: string
+      file:
+        description: e.g., output.csv
+        type: string
+    type: object
+  go-data-pipeline_internal_model.PipelineJobSpec:
+    properties:
+      aggregation:
+        allOf:
+        - $ref: '#/definitions/go-data-pipeline_internal_model.Aggregation'
+        description: optional global aggregation
+      concurrency:
+        allOf:
+        - $ref: '#/definitions/go-data-pipeline_internal_model.ConcurrencyConfig'
+        description: concurrency and worker config
+      export:
+        allOf:
+        - $ref: '#/definitions/go-data-pipeline_internal_model.Export'
+        description: output/export rules
+      logging:
+        description: enable detailed logs
+        type: boolean
+      sources:
+        description: multiple data sources
+        items:
+          $ref: '#/definitions/go-data-pipeline_internal_model.Source'
+        type: array
+      transformations:
+        description: global transformations
+        items:
+          type: string
+        type: array
+    type: object
+  go-data-pipeline_internal_model.Source:
+    properties:
+      aggregation:
+        allOf:
+        - $ref: '#/definitions/go-data-pipeline_internal_model.Aggregation'
+        description: per-source aggregation
+      type:
+        description: csv, json, api
+        type: string
+      url:
+        type: string
+      validation:
+        allOf:
+        - $ref: '#/definitions/go-data-pipeline_internal_model.ValidationRules'
+        description: per-source validation
+    type: object
+  go-data-pipeline_internal_model.ValidationRules:
+    properties:
+      customRules:
+        additionalProperties:
+          type: string
+        description: e.g., regex or expression
+        type: object
+      maxValues:
+        additionalProperties:
+          format: float64
+          type: number
+        description: optional max limits
+        type: object
+      minValues:
+        additionalProperties:
+          format: float64
+          type: number
+        description: min allowed numeric values
+        type: object
+      numericFields:
+        description: fields that must be numeric
+        items:
+          type: string
+        type: array
+      requiredFields:
+        description: fields that must be present
+        items:
+          type: string
+        type: array
+    type: object
+  go-data-pipeline_internal_model.Workers:
+    properties:
+      aggregation:
+        type: integer
+      export:
+        type: integer
+      ingest:
+        type: integer
+      transform:
+        type: integer
+      validation:
+        type: integer
+    type: object
+host: localhost:8080
+info:
+  contact:
+    email: api-support@yourcompany.com
+    name: API Support Team
+    url: https://yourcompany.com/support
+  description: A modern, high-performance data pipeline API for processing, transforming,
+    and aggregating data from multiple sources with real-time monitoring and advanced
+    analytics capabilities.
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+  termsOfService: https://yourcompany.com/terms
+  title: "\U0001F680 Go Data Pipeline API"
+  version: "2.0"
+paths:
+  /download/{jobID}/{filename}:
+    get:
+      consumes:
+      - application/json
+      description: Download a specific output file from a pipeline job
+      parameters:
+      - description: Job ID
+        in: path
+        name: jobID
+        required: true
+        type: string
+      - description: File name
+        in: path
+        name: filename
+        required: true
+        type: string
+      produces:
+      - application/octet-stream
+      responses:
+        "200":
+          description: File download
+          schema:
+            type: file
+        "400":
+          description: Invalid URL format
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: File not found
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Download file
+      tags:
+      - files
+  /files/{id}:
+    get:
+      consumes:
+      - application/json
+      description: Get information about a specific file by ID or all files for a
+        job ID
+      parameters:
+      - description: File ID (numeric) or Job ID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: File information
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Invalid file ID
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: File not found
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Get file information
+      tags:
+      - files
+  /pipelines:
+    get:
+      consumes:
+      - application/json
+      description: Get a list of all pipeline jobs with their current status
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: List of pipelines
+          schema:
+            items:
+              additionalProperties: true
+              type: object
+            type: array
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: List all pipelines
+      tags:
+      - pipelines
+    post:
+      consumes:
+      - application/json
+      description: Create and start a new data pipeline job with the provided configuration
+      parameters:
+      - description: Pipeline configuration
+        in: body
+        name: pipeline
+        required: true
+        schema:
+          $ref: '#/definitions/go-data-pipeline_internal_model.PipelineJobSpec'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Pipeline created successfully
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Invalid request payload
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Create a new pipeline
+      tags:
+      - pipelines
+  /pipelines/{id}:
+    delete:
+      consumes:
+      - application/json
+      description: Delete a pipeline job and all its associated files and data
+      parameters:
+      - description: Pipeline ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Pipeline deleted
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Invalid pipeline ID
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Pipeline not found
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Delete pipeline
+      tags:
+      - pipelines
+    get:
+      consumes:
+      - application/json
+      description: Retrieve details of a specific pipeline job
+      parameters:
+      - description: Pipeline ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Pipeline details
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Invalid pipeline ID
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Pipeline not found
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Get pipeline
+      tags:
+      - pipelines
+  /pipelines/{id}/cancel:
+    patch:
+      consumes:
+      - application/json
+      description: Cancel a running pipeline job
+      parameters:
+      - description: Pipeline ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Pipeline cancelled
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Invalid pipeline ID or status
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Pipeline not found
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Cancel pipeline
+      tags:
+      - pipelines
+  /pipelines/{id}/errors:
+    get:
+      consumes:
+      - application/json
+      description: Retrieve all errors that occurred during pipeline execution
+      parameters:
+      - description: Pipeline ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Pipeline errors
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Invalid pipeline ID
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Get pipeline errors
+      tags:
+      - pipelines
+  /pipelines/{id}/results:
+    get:
+      consumes:
+      - application/json
+      description: Retrieve aggregated results for a specific pipeline job
+      parameters:
+      - description: Pipeline ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Pipeline results
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Invalid pipeline ID
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Get pipeline results
+      tags:
+      - pipelines
+  /pipelines/{id}/retry:
+    post:
+      consumes:
+      - application/json
+      description: Retry a pipeline job with the same configuration
+      parameters:
+      - description: Pipeline ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Retry initiated
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Invalid pipeline ID
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Pipeline not found
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Retry pipeline
+      tags:
+      - pipelines
+schemes:
+- http
+- https
+securityDefinitions:
+  ApiKeyAuth:
+    description: API Key for authentication
+    in: header
+    name: X-API-Key
+    type: apiKey
+  BearerAuth:
+    description: Type "Bearer" followed by a space and JWT token.
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"
