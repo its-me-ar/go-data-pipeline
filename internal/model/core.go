@@ -1,5 +1,8 @@
 package model
 
+// GenericRecord is a schema-agnostic map for any data source
+type GenericRecord map[string]interface{}
+
 // Record represents a single input record
 type Record struct {
 	ID    string  `json:"id"`
@@ -62,4 +65,20 @@ type PipelineJobSpec struct {
 	Export          *Export           `json:"export,omitempty"`      // output/export rules
 	Concurrency     ConcurrencyConfig `json:"concurrency"`           // concurrency and worker config
 	Logging         bool              `json:"logging"`               // enable detailed logs
+}
+
+// PipelineChannels holds all the channels used for data flow between stages
+type PipelineChannels struct {
+	Records     chan GenericRecord    `json:"-"`
+	Validated   chan GenericRecord    `json:"-"`
+	Transformed chan GenericRecord    `json:"-"`
+	Aggregated  chan AggregatedResult `json:"-"`
+	Errors      chan error            `json:"-"`
+}
+
+// PipelineOrchestrator manages the execution of all pipeline stages
+type PipelineOrchestrator struct {
+	JobID   string           `json:"job_id"`
+	Job     PipelineJobSpec  `json:"job"`
+	Tracker *PipelineTracker `json:"-"`
 }

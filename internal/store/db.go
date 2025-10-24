@@ -97,6 +97,19 @@ func InitDB(dbPath string) error {
 		created_at DATETIME
 	);
 	`
+	outputFilesTable := `
+	CREATE TABLE IF NOT EXISTS output_files (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		job_id TEXT,
+		file_name TEXT,
+		file_path TEXT,
+		file_type TEXT,
+		file_size INTEGER,
+		download_url TEXT,
+		created_at DATETIME,
+		FOREIGN KEY (job_id) REFERENCES jobs (id)
+	);
+	`
 
 	if _, err := db.Exec(jobTable); err != nil {
 		return err
@@ -117,6 +130,9 @@ func InitDB(dbPath string) error {
 		return err
 	}
 	if _, err := db.Exec(stageProgressTable); err != nil {
+		return err
+	}
+	if _, err := db.Exec(outputFilesTable); err != nil {
 		return err
 	}
 
@@ -613,4 +629,141 @@ func GetPipelineSummary(jobID string) (map[string]interface{}, error) {
 			"total_records": len(records),
 		},
 	}, nil
+}
+
+// SaveOutputFile stores information about an output file
+func SaveOutputFile(jobID, fileName, filePath, fileType string, fileSize int64, downloadURL string) error {
+	query := `
+		INSERT INTO output_files (job_id, file_name, file_path, file_type, file_size, download_url, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+	`
+	_, err := db.Exec(query, jobID, fileName, filePath, fileType, fileSize, downloadURL, time.Now())
+	return err
+}
+
+// GetOutputFiles retrieves all output files for a job
+func GetOutputFiles(jobID string) ([]map[string]interface{}, error) {
+	query := `
+		SELECT id, job_id, file_name, file_path, file_type, file_size, download_url, created_at
+		FROM output_files
+		WHERE job_id = ?
+		ORDER BY created_at DESC
+	`
+	rows, err := db.Query(query, jobID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var files []map[string]interface{}
+	for rows.Next() {
+		var id int
+		var jobID, fileName, filePath, fileType, downloadURL string
+		var fileSize int64
+		var createdAt time.Time
+
+		err := rows.Scan(&id, &jobID, &fileName, &filePath, &fileType, &fileSize, &downloadURL, &createdAt)
+		if err != nil {
+			return nil, err
+		}
+
+		files = append(files, map[string]interface{}{
+			"id":           id,
+			"job_id":       jobID,
+			"file_name":    fileName,
+			"file_path":    filePath,
+			"file_type":    fileType,
+			"file_size":    fileSize,
+			"download_url": downloadURL,
+			"created_at":   createdAt,
+		})
+	}
+
+	return files, nil
+}
+
+// GetOutputFileByID retrieves a specific output file by ID
+func GetOutputFileByID(fileID int) (map[string]interface{}, error) {
+	query := `
+		SELECT id, job_id, file_name, file_path, file_type, file_size, download_url, created_at
+		FROM output_files
+		WHERE id = ?
+	`
+	row := db.QueryRow(query, fileID)
+
+	var id int
+	var jobID, fileName, filePath, fileType, downloadURL string
+	var fileSize int64
+	var createdAt time.Time
+
+	err := row.Scan(&id, &jobID, &fileName, &filePath, &fileType, &fileSize, &downloadURL, &createdAt)
+	if err != nil {
+		return nil, err
+	}
+
+	return map[string]interface{}{
+		"id":           id,
+		"job_id":       jobID,
+		"file_name":    fileName,
+		"file_path":    filePath,
+		"file_type":    fileType,
+		"file_size":    fileSize,
+		"download_url": downloadURL,
+		"created_at":   createdAt,
+	}, nil
+}
+
+// DeleteJob deletes a job and all its related data
+func DeleteJob(jobID string) error {
+	// Start a transaction to ensure atomicity
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// Delete related records in the correct order (respecting foreign key constraints)
+
+	// Delete output files
+	if _, err := tx.Exec("DELETE FROM output_files WHERE job_id = ?", jobID); err != nil {
+		return err
+	}
+
+	// Delete stage progress
+	if _, err := tx.Exec("DELETE FROM stage_progress WHERE job_id = ?", jobID); err != nil {
+		return err
+	}
+
+	// Delete pipeline metrics
+	if _, err := tx.Exec("DELETE FROM pipeline_metrics WHERE job_id = ?", jobID); err != nil {
+		return err
+	}
+
+	// Delete pipeline logs
+	if _, err := tx.Exec("DELETE FROM pipeline_logs WHERE job_id = ?", jobID); err != nil {
+		return err
+	}
+
+	// Delete raw records
+	if _, err := tx.Exec("DELETE FROM raw_records WHERE job_id = ?", jobID); err != nil {
+		return err
+	}
+
+	// Delete aggregated results
+	if _, err := tx.Exec("DELETE FROM aggregated_results WHERE job_id = ?", jobID); err != nil {
+		return err
+	}
+
+	// Delete job errors
+	if _, err := tx.Exec("DELETE FROM job_errors WHERE job_id = ?", jobID); err != nil {
+		return err
+	}
+
+	// Finally, delete the job itself
+	if _, err := tx.Exec("DELETE FROM jobs WHERE id = ?", jobID); err != nil {
+		return err
+	}
+
+	// Commit the transaction
+	return tx.Commit()
 }

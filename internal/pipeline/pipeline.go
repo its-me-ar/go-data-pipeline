@@ -13,198 +13,226 @@ import (
 // GenericRecord is a schema-agnostic map for any data source
 type GenericRecord map[string]interface{}
 
-// ------------------- Pipeline Runner -------------------
+// PipelineChannels holds all the channels used for data flow between stages
+type PipelineChannels struct {
+	records     chan GenericRecord
+	validated   chan GenericRecord
+	transformed chan GenericRecord
+	aggregated  chan AggregatedResult
+	errors      chan error
+}
+
+// ------------------- Pipeline Orchestrator -------------------
+
+// Run orchestrates the entire data processing pipeline
 func Run(ctx context.Context, jobID string, job model.PipelineJobSpec) (err error) {
 	start := time.Now()
 	fmt.Printf("🚀 Starting pipeline for job: %s\n", jobID)
 
+	// Initialize pipeline tracker for monitoring
+	tracker := NewPipelineTracker(jobID, job)
+	defer tracker.Stop()
+
 	// Update status to running
 	store.UpdateJobStatus(jobID, "running")
+	tracker.StartStage("pipeline", 1)
 
 	// Defer function to handle status updates on completion/error
 	defer func() {
 		if err != nil {
 			store.UpdateJobStatus(jobID, "failed")
 			store.SaveJobError(jobID, err)
+			tracker.RecordError("pipeline", "system", err.Error(), "", nil, false)
+			tracker.Fail()
+		} else {
+			tracker.Complete()
 		}
 	}()
 
-	// Parse job timeout
-	timeout, err := time.ParseDuration(job.Concurrency.JobTimeout)
-	if err != nil {
-		timeout = 5 * time.Minute
+	// Create pipeline orchestrator (pass nil for tracker for now)
+	orchestrator := NewPipelineOrchestrator(jobID, job, nil)
+
+	// Execute the pipeline
+	if err := orchestrator.Execute(ctx); err != nil {
+		return err
 	}
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	recordsCh := make(chan GenericRecord, job.Concurrency.ChannelBufferSize)
-	validatedCh := make(chan GenericRecord, job.Concurrency.ChannelBufferSize)
-	errorCh := make(chan error, job.Concurrency.ChannelBufferSize)
-	transformedCh := make(chan GenericRecord, job.Concurrency.ChannelBufferSize)
-
-	var wg sync.WaitGroup
-
-	// --- ERROR LOGGER ---
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for err := range errorCh {
-			log.Printf("❌ Error in job %s: %v\n", jobID, err)
-		}
-	}()
-
-	// --- INGESTION STAGE ---
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		startTime := time.Now()
-		store.UpdateJobStatus(jobID, "ingesting")
-		store.SaveStageProgress(jobID, "ingestion", "started", &startTime, nil, 0, 0)
-		store.SavePipelineLog(jobID, "ingestion", "info", "Starting ingestion stage", map[string]interface{}{
-			"sources_count": len(job.Sources),
-		})
-
-		StartIngestion(ctx, job.Sources, recordsCh, errorCh)
-		close(recordsCh) // safe: only this goroutine closes recordsCh
-
-		endTime := time.Now()
-		store.SaveStageProgress(jobID, "ingestion", "completed", &startTime, &endTime, 0, 0)
-		store.SavePipelineLog(jobID, "ingestion", "info", "Ingestion stage completed", map[string]interface{}{
-			"duration_ms": endTime.Sub(startTime).Milliseconds(),
-		})
-	}()
-
-	// --- VALIDATION STAGE ---
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		fmt.Println("🔍 Starting validation stage...")
-		store.UpdateJobStatus(jobID, "validating")
-
-		numWorkers := job.Concurrency.Workers.Validation
-		if numWorkers == 0 {
-			numWorkers = 3 // default
-		}
-
-		fmt.Printf("🔍 Validation stage: waiting for records from ingestion stage...\n")
-		ValidateRecords(
-			ctx,
-			job.Sources,
-			recordsCh,
-			validatedCh,
-			errorCh,
-			numWorkers,
-		)
-
-		fmt.Println("✅ Validation stage setup complete.")
-	}()
-
-	// --- TRANSFORMATION STAGE ---
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		fmt.Println("🔄 Starting transformation stage...")
-		store.UpdateJobStatus(jobID, "transforming")
-
-		numWorkers := job.Concurrency.Workers.Transform
-		if numWorkers == 0 {
-			numWorkers = 2 // default
-		}
-
-		fmt.Printf("🔄 Transform stage: waiting for records from validation stage...\n")
-		TransformRecords(
-			ctx,
-			job.Transformations,
-			validatedCh,
-			transformedCh,
-			errorCh,
-			numWorkers,
-		)
-
-		fmt.Println("✅ Transformation stage setup complete.")
-	}()
-
-	// --- AGGREGATION STAGE ---
-	aggregatedCh := make(chan AggregatedResult, 100)
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		startTime := time.Now()
-		fmt.Println("📊 Starting aggregation stage...")
-		store.UpdateJobStatus(jobID, "aggregating")
-		store.SaveStageProgress(jobID, "aggregation", "started", &startTime, nil, 0, 0)
-
-		numWorkers := job.Concurrency.Workers.Aggregation
-		if numWorkers == 0 {
-			numWorkers = 2 // default
-		}
-
-		store.SavePipelineLog(jobID, "aggregation", "info", "Starting aggregation stage", map[string]interface{}{
-			"group_by": job.Aggregation.GroupBy,
-			"metrics":  job.Aggregation.Metrics,
-			"workers":  numWorkers,
-		})
-
-		aggregatedResults := AggregateRecords(ctx, transformedCh, job, numWorkers)
-
-		// Forward aggregated results to the channel
-		resultCount := 0
-		for result := range aggregatedResults {
-			select {
-			case <-ctx.Done():
-				store.SavePipelineLog(jobID, "aggregation", "warning", "Aggregation cancelled", map[string]interface{}{
-					"results_processed": resultCount,
-				})
-				return
-			case aggregatedCh <- result:
-				resultCount++
-			}
-		}
-
-		endTime := time.Now()
-		store.SaveStageProgress(jobID, "aggregation", "completed", &startTime, &endTime, resultCount, 0)
-		store.SavePipelineLog(jobID, "aggregation", "info", "Aggregation stage completed", map[string]interface{}{
-			"results_count": resultCount,
-			"duration_ms":   endTime.Sub(startTime).Milliseconds(),
-		})
-		fmt.Println("✅ Aggregation stage complete.")
-		close(aggregatedCh)
-	}()
-
-	// --- EXPORT STAGE ---
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		fmt.Println("💾 Starting export stage...")
-		store.UpdateJobStatus(jobID, "exporting")
-
-		exportResults := ExportData(ctx, aggregatedCh, job, jobID)
-
-		// Process export results
-		exportCount := 0
-		for result := range exportResults {
-			exportCount++
-			if result.Success {
-				fmt.Printf("✅ Export %d: %d records exported to %s (%s)\n",
-					exportCount, result.RecordCount, result.Path, result.Type)
-			} else {
-				fmt.Printf("❌ Export %d failed: %s\n", exportCount, result.Error)
-			}
-		}
-
-		fmt.Printf("💾 Export Summary: %d export operations completed\n", exportCount)
-	}()
-
-	// Wait for all stages to finish
-	wg.Wait()
-
-	// Close errorCh at the very end
-	close(errorCh)
 
 	duration := time.Since(start)
 	fmt.Printf("🏁 Pipeline completed successfully for job: %s in %v\n", jobID, duration)
 
-	// Update status to completed
+	// Update final status
 	store.UpdateJobStatus(jobID, "completed")
+	store.SavePipelineLog(jobID, "pipeline", "info", "Pipeline completed successfully", map[string]interface{}{
+		"duration_ms": duration.Milliseconds(),
+		"status":      "completed",
+	})
+
+	return nil
+}
+
+// PipelineOrchestrator manages the execution of all pipeline stages
+type PipelineOrchestrator struct {
+	jobID   string
+	job     model.PipelineJobSpec
+	tracker interface{} // Can be nil or *model.PipelineTracker
+}
+
+// NewPipelineOrchestrator creates a new pipeline orchestrator
+func NewPipelineOrchestrator(jobID string, job model.PipelineJobSpec, tracker interface{}) *PipelineOrchestrator {
+	return &PipelineOrchestrator{
+		jobID:   jobID,
+		job:     job,
+		tracker: tracker,
+	}
+}
+
+// Execute runs the entire pipeline by coordinating all stages
+func (po *PipelineOrchestrator) Execute(ctx context.Context) error {
+	// Create channels for data flow between stages
+	channels := po.createChannels()
+
+	// Start error logger
+	errorLogger := po.startErrorLogger(ctx, channels.errors)
+	defer errorLogger.Wait()
+
+	// Execute all stages in sequence
+	var wg sync.WaitGroup
+
+	// Stage 1: Ingestion
+	if err := po.executeIngestionStage(ctx, channels, &wg); err != nil {
+		return err
+	}
+
+	// Stage 2: Validation
+	if err := po.executeValidationStage(ctx, channels, &wg); err != nil {
+		return err
+	}
+
+	// Stage 3: Transformation
+	if err := po.executeTransformationStage(ctx, channels, &wg); err != nil {
+		return err
+	}
+
+	// Stage 4: Aggregation
+	if err := po.executeAggregationStage(ctx, channels, &wg); err != nil {
+		return err
+	}
+
+	// Stage 5: Export
+	if err := po.executeExportStage(ctx, channels, &wg); err != nil {
+		return err
+	}
+
+	// Wait for all stages to complete
+	wg.Wait()
+
+	// Close error channel
+	close(channels.errors)
+
+	return nil
+}
+
+// createChannels creates all necessary channels for the pipeline
+func (po *PipelineOrchestrator) createChannels() *PipelineChannels {
+	bufferSize := po.job.Concurrency.ChannelBufferSize
+	if bufferSize == 0 {
+		bufferSize = 100 // Default buffer size
+	}
+
+	return &PipelineChannels{
+		records:     make(chan GenericRecord, bufferSize),
+		validated:   make(chan GenericRecord, bufferSize),
+		transformed: make(chan GenericRecord, bufferSize),
+		aggregated:  make(chan AggregatedResult, 100),
+		errors:      make(chan error, bufferSize),
+	}
+}
+
+// startErrorLogger starts a goroutine to log errors from the error channel
+func (po *PipelineOrchestrator) startErrorLogger(ctx context.Context, errorCh <-chan error) *sync.WaitGroup {
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for err := range errorCh {
+			log.Printf("❌ Error in job %s: %v\n", po.jobID, err)
+		}
+	}()
+	return &wg
+}
+
+// executeIngestionStage runs the ingestion stage using the ingest.go file
+func (po *PipelineOrchestrator) executeIngestionStage(ctx context.Context, channels *PipelineChannels, wg *sync.WaitGroup) error {
+	ingestionComplete := make(chan struct{})
+	wg.Add(1)
+
+	go func() {
+		defer wg.Done()
+		defer close(ingestionComplete)
+
+		// Use the ingestion stage from ingest.go
+		ExecuteIngestionStage(ctx, po.jobID, po.job, channels.records, channels.errors, nil)
+		close(channels.records)
+	}()
+
+	// Wait for ingestion to complete before proceeding
+	<-ingestionComplete
+	return nil
+}
+
+// executeValidationStage runs the validation stage using the validate.go file
+func (po *PipelineOrchestrator) executeValidationStage(ctx context.Context, channels *PipelineChannels, wg *sync.WaitGroup) error {
+	wg.Add(1)
+
+	go func() {
+		defer wg.Done()
+
+		// Use the validation stage from validate.go
+		ExecuteValidationStage(ctx, po.jobID, po.job, channels.records, channels.validated, channels.errors, nil)
+	}()
+
+	return nil
+}
+
+// executeTransformationStage runs the transformation stage using the transform.go file
+func (po *PipelineOrchestrator) executeTransformationStage(ctx context.Context, channels *PipelineChannels, wg *sync.WaitGroup) error {
+	wg.Add(1)
+
+	go func() {
+		defer wg.Done()
+
+		// Use the transformation stage from transform.go
+		ExecuteTransformationStage(ctx, po.jobID, po.job, channels.validated, channels.transformed, channels.errors, nil)
+	}()
+
+	return nil
+}
+
+// executeAggregationStage runs the aggregation stage using the aggregate.go file
+func (po *PipelineOrchestrator) executeAggregationStage(ctx context.Context, channels *PipelineChannels, wg *sync.WaitGroup) error {
+	wg.Add(1)
+
+	go func() {
+		defer wg.Done()
+
+		// Use the aggregation stage from aggregate.go
+		ExecuteAggregationStage(ctx, po.jobID, po.job, channels.transformed, channels.aggregated, channels.errors, nil)
+		close(channels.aggregated)
+	}()
+
+	return nil
+}
+
+// executeExportStage runs the export stage using the export.go file
+func (po *PipelineOrchestrator) executeExportStage(ctx context.Context, channels *PipelineChannels, wg *sync.WaitGroup) error {
+	wg.Add(1)
+
+	go func() {
+		defer wg.Done()
+
+		// Use the export stage from export.go
+		ExecuteExportStage(ctx, po.jobID, po.job, channels.aggregated, channels.errors, nil)
+	}()
+
 	return nil
 }

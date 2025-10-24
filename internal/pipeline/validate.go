@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"go-data-pipeline/internal/model"
+	"go-data-pipeline/internal/store"
 	"go-data-pipeline/pkg/utils"
 	"sync"
+	"time"
 )
 
 // ValidateRecords validates data from ingestion according to per-source rules.
@@ -128,4 +130,33 @@ func validateRecord(rec GenericRecord, rules *model.ValidationRules) (bool, erro
 	}
 
 	return true, nil
+}
+
+// ------------------- Stage Execution -------------------
+
+// ExecuteValidationStage executes the complete validation stage with tracking
+func ExecuteValidationStage(ctx context.Context, jobID string, job model.PipelineJobSpec, in <-chan GenericRecord, out chan<- GenericRecord, errors chan<- error, tracker interface{}) {
+	startTime := time.Now()
+	store.UpdateJobStatus(jobID, "validating")
+
+	numWorkers := job.Concurrency.Workers.Validation
+	if numWorkers == 0 {
+		numWorkers = 3 // default
+	}
+
+	// tracker.StartStage("validation", numWorkers)
+	store.SaveStageProgress(jobID, "validation", "started", &startTime, nil, 0, 0)
+	store.SavePipelineLog(jobID, "validation", "info", "Starting validation stage", map[string]interface{}{
+		"workers": numWorkers,
+	})
+
+	// Execute validation using the existing function
+	ValidateRecords(ctx, job.Sources, in, out, errors, numWorkers)
+
+	endTime := time.Now()
+	// tracker.EndStage("validation", 0) // Record count will be updated by validation workers
+	store.SaveStageProgress(jobID, "validation", "completed", &startTime, &endTime, 0, 0)
+	store.SavePipelineLog(jobID, "validation", "info", "Validation stage completed", map[string]interface{}{
+		"duration_ms": endTime.Sub(startTime).Milliseconds(),
+	})
 }

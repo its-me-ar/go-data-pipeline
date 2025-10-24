@@ -1,0 +1,711 @@
+{
+    "schemes": [
+        "http",
+        "https"
+    ],
+    "swagger": "2.0",
+    "info": {
+        "description": "A modern, high-performance data pipeline API for processing, transforming, and aggregating data from multiple sources with real-time monitoring and advanced analytics capabilities.",
+        "title": "🚀 Go Data Pipeline API",
+        "termsOfService": "https://yourcompany.com/terms",
+        "contact": {
+            "name": "API Support Team",
+            "url": "https://yourcompany.com/support",
+            "email": "api-support@yourcompany.com"
+        },
+        "license": {
+            "name": "MIT",
+            "url": "https://opensource.org/licenses/MIT"
+        },
+        "version": "2.0"
+    },
+    "host": "localhost:8080",
+    "basePath": "/api/v1",
+    "paths": {
+        "/download/{jobID}/{filename}": {
+            "get": {
+                "description": "Download a specific output file from a pipeline job",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/octet-stream"
+                ],
+                "tags": [
+                    "files"
+                ],
+                "summary": "Download file",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Job ID",
+                        "name": "jobID",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "File name",
+                        "name": "filename",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "File download",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid URL format",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "File not found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/files/{id}": {
+            "get": {
+                "description": "Get information about a specific file by ID or all files for a job ID",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "files"
+                ],
+                "summary": "Get file information",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "File ID (numeric) or Job ID (UUID)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "File information",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid file ID",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "File not found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/pipelines": {
+            "get": {
+                "description": "Get a list of all pipeline jobs with their current status",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "pipelines"
+                ],
+                "summary": "List all pipelines",
+                "responses": {
+                    "200": {
+                        "description": "List of pipelines",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "additionalProperties": true
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Create and start a new data pipeline job with the provided configuration",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "pipelines"
+                ],
+                "summary": "Create a new pipeline",
+                "parameters": [
+                    {
+                        "description": "Pipeline configuration",
+                        "name": "pipeline",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/go-data-pipeline_internal_model.PipelineJobSpec"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Pipeline created successfully",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request payload",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/pipelines/{id}": {
+            "get": {
+                "description": "Retrieve details of a specific pipeline job",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "pipelines"
+                ],
+                "summary": "Get pipeline",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Pipeline ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Pipeline details",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid pipeline ID",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Pipeline not found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "description": "Delete a pipeline job and all its associated files and data",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "pipelines"
+                ],
+                "summary": "Delete pipeline",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Pipeline ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Pipeline deleted",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid pipeline ID",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Pipeline not found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/pipelines/{id}/cancel": {
+            "patch": {
+                "description": "Cancel a running pipeline job",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "pipelines"
+                ],
+                "summary": "Cancel pipeline",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Pipeline ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Pipeline cancelled",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid pipeline ID or status",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Pipeline not found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/pipelines/{id}/errors": {
+            "get": {
+                "description": "Retrieve all errors that occurred during pipeline execution",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "pipelines"
+                ],
+                "summary": "Get pipeline errors",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Pipeline ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Pipeline errors",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid pipeline ID",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/pipelines/{id}/results": {
+            "get": {
+                "description": "Retrieve aggregated results for a specific pipeline job",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "pipelines"
+                ],
+                "summary": "Get pipeline results",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Pipeline ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Pipeline results",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid pipeline ID",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/pipelines/{id}/retry": {
+            "post": {
+                "description": "Retry a pipeline job with the same configuration",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "pipelines"
+                ],
+                "summary": "Retry pipeline",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Pipeline ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Retry initiated",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid pipeline ID",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Pipeline not found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "definitions": {
+        "go-data-pipeline_internal_model.Aggregation": {
+            "type": "object",
+            "properties": {
+                "groupBy": {
+                    "type": "string"
+                },
+                "metrics": {
+                    "description": "e.g., [\"sum\", \"avg\", \"count\"]",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "go-data-pipeline_internal_model.ConcurrencyConfig": {
+            "type": "object",
+            "properties": {
+                "apiRetry": {
+                    "type": "integer"
+                },
+                "channelBufferSize": {
+                    "type": "integer"
+                },
+                "jobTimeout": {
+                    "description": "e.g., \"5m\"",
+                    "type": "string"
+                },
+                "workers": {
+                    "$ref": "#/definitions/go-data-pipeline_internal_model.Workers"
+                }
+            }
+        },
+        "go-data-pipeline_internal_model.Export": {
+            "type": "object",
+            "properties": {
+                "batchSize": {
+                    "description": "optional batch size",
+                    "type": "integer"
+                },
+                "db": {
+                    "description": "e.g., postgres, sqlite",
+                    "type": "string"
+                },
+                "file": {
+                    "description": "e.g., output.csv",
+                    "type": "string"
+                }
+            }
+        },
+        "go-data-pipeline_internal_model.PipelineJobSpec": {
+            "type": "object",
+            "properties": {
+                "aggregation": {
+                    "description": "optional global aggregation",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/go-data-pipeline_internal_model.Aggregation"
+                        }
+                    ]
+                },
+                "concurrency": {
+                    "description": "concurrency and worker config",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/go-data-pipeline_internal_model.ConcurrencyConfig"
+                        }
+                    ]
+                },
+                "export": {
+                    "description": "output/export rules",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/go-data-pipeline_internal_model.Export"
+                        }
+                    ]
+                },
+                "logging": {
+                    "description": "enable detailed logs",
+                    "type": "boolean"
+                },
+                "sources": {
+                    "description": "multiple data sources",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/go-data-pipeline_internal_model.Source"
+                    }
+                },
+                "transformations": {
+                    "description": "global transformations",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "go-data-pipeline_internal_model.Source": {
+            "type": "object",
+            "properties": {
+                "aggregation": {
+                    "description": "per-source aggregation",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/go-data-pipeline_internal_model.Aggregation"
+                        }
+                    ]
+                },
+                "type": {
+                    "description": "csv, json, api",
+                    "type": "string"
+                },
+                "url": {
+                    "type": "string"
+                },
+                "validation": {
+                    "description": "per-source validation",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/go-data-pipeline_internal_model.ValidationRules"
+                        }
+                    ]
+                }
+            }
+        },
+        "go-data-pipeline_internal_model.ValidationRules": {
+            "type": "object",
+            "properties": {
+                "customRules": {
+                    "description": "e.g., regex or expression",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "maxValues": {
+                    "description": "optional max limits",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "number",
+                        "format": "float64"
+                    }
+                },
+                "minValues": {
+                    "description": "min allowed numeric values",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "number",
+                        "format": "float64"
+                    }
+                },
+                "numericFields": {
+                    "description": "fields that must be numeric",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "requiredFields": {
+                    "description": "fields that must be present",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "go-data-pipeline_internal_model.Workers": {
+            "type": "object",
+            "properties": {
+                "aggregation": {
+                    "type": "integer"
+                },
+                "export": {
+                    "type": "integer"
+                },
+                "ingest": {
+                    "type": "integer"
+                },
+                "transform": {
+                    "type": "integer"
+                },
+                "validation": {
+                    "type": "integer"
+                }
+            }
+        }
+    },
+    "securityDefinitions": {
+        "ApiKeyAuth": {
+            "description": "API Key for authentication",
+            "type": "apiKey",
+            "name": "X-API-Key",
+            "in": "header"
+        },
+        "BearerAuth": {
+            "description": "Type \"Bearer\" followed by a space and JWT token.",
+            "type": "apiKey",
+            "name": "Authorization",
+            "in": "header"
+        }
+    }
+}

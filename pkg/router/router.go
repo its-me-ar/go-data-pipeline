@@ -44,9 +44,9 @@ func New() *Router {
 			// Try to find a wildcard route
 			found := false
 			for routePath := range r.paths {
-				if strings.HasSuffix(routePath, "/*") {
-					prefix := strings.TrimSuffix(routePath, "/*")
-					if strings.HasPrefix(req.URL.Path, prefix+"/") {
+				if strings.Contains(routePath, "/*") {
+					// Handle multiple wildcards by converting to regex-like matching
+					if matchWildcardRoute(req.URL.Path, routePath) {
 						wildcardKey := req.Method + ":" + routePath
 						if h, ok := r.routes[wildcardKey]; ok {
 							h(lrw, req)
@@ -84,6 +84,48 @@ func New() *Router {
 	return r
 }
 
+// matchWildcardRoute checks if a request path matches a wildcard route pattern
+func matchWildcardRoute(requestPath, routePattern string) bool {
+	// Split both paths into segments
+	requestSegments := strings.Split(strings.Trim(requestPath, "/"), "/")
+	routeSegments := strings.Split(strings.Trim(routePattern, "/"), "/")
+
+	// Handle single wildcard at the end (matches any number of remaining segments)
+	if len(routeSegments) > 0 && routeSegments[len(routeSegments)-1] == "*" {
+		// Must have at least as many segments as the route (excluding the wildcard)
+		if len(requestSegments) < len(routeSegments)-1 {
+			return false
+		}
+
+		// Check all segments except the last wildcard
+		for i := 0; i < len(routeSegments)-1; i++ {
+			if requestSegments[i] != routeSegments[i] {
+				return false
+			}
+		}
+		return true
+	}
+
+	// Handle exact segment matching (original logic)
+	if len(requestSegments) != len(routeSegments) {
+		return false
+	}
+
+	// Check each segment
+	for i, routeSegment := range routeSegments {
+		if routeSegment == "*" {
+			// Wildcard matches any segment
+			continue
+		}
+		if requestSegments[i] != routeSegment {
+			// Exact match required for non-wildcard segments
+			return false
+		}
+	}
+
+	return true
+}
+
 // --- Register paths ---
 func (r *Router) register(method, path string, handler HandlerFunc) {
 	key := method + ":" + path
@@ -91,9 +133,10 @@ func (r *Router) register(method, path string, handler HandlerFunc) {
 	r.paths[path] = true
 }
 
-func (r *Router) GET(path string, handler HandlerFunc)  { r.register(http.MethodGet, path, handler) }
-func (r *Router) POST(path string, handler HandlerFunc) { r.register(http.MethodPost, path, handler) }
-func (r *Router) PUT(path string, handler HandlerFunc)  { r.register(http.MethodPut, path, handler) }
+func (r *Router) GET(path string, handler HandlerFunc)   { r.register(http.MethodGet, path, handler) }
+func (r *Router) POST(path string, handler HandlerFunc)  { r.register(http.MethodPost, path, handler) }
+func (r *Router) PUT(path string, handler HandlerFunc)   { r.register(http.MethodPut, path, handler) }
+func (r *Router) PATCH(path string, handler HandlerFunc) { r.register(http.MethodPatch, path, handler) }
 func (r *Router) DELETE(path string, handler HandlerFunc) {
 	r.register(http.MethodDelete, path, handler)
 }
@@ -145,6 +188,8 @@ func methodColor(method string) string {
 	case http.MethodPost:
 		return colorBlue
 	case http.MethodPut:
+		return colorYellow
+	case http.MethodPatch:
 		return colorYellow
 	case http.MethodDelete:
 		return colorRed

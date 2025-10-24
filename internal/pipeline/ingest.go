@@ -6,12 +6,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"go-data-pipeline/internal/model"
+	"go-data-pipeline/internal/store"
 	"go-data-pipeline/pkg/utils"
 	"io"
 	"net/http"
 	"os"
 	"strings"
 	"sync"
+	"time"
 )
 
 // ------------------- Ingestion -------------------
@@ -182,4 +184,28 @@ func ingestJSON(ctx context.Context, url string, out chan<- GenericRecord, error
 	}
 
 	fmt.Printf("🌐 JSON ingestion done: %d records read from %s\n", recordCount, url)
+}
+
+// ------------------- Stage Execution -------------------
+
+// ExecuteIngestionStage executes the complete ingestion stage with tracking
+func ExecuteIngestionStage(ctx context.Context, jobID string, job model.PipelineJobSpec, out chan<- GenericRecord, errors chan<- error, tracker interface{}) {
+	startTime := time.Now()
+	store.UpdateJobStatus(jobID, "ingesting")
+	// tracker.StartStage("ingestion", len(job.Sources))
+
+	store.SaveStageProgress(jobID, "ingestion", "started", &startTime, nil, 0, 0)
+	store.SavePipelineLog(jobID, "ingestion", "info", "Starting ingestion stage", map[string]interface{}{
+		"sources_count": len(job.Sources),
+	})
+
+	// Execute ingestion using the existing function
+	StartIngestion(ctx, job.Sources, out, errors)
+
+	endTime := time.Now()
+	// tracker.EndStage("ingestion", 0) // Record count will be updated by individual sources
+	store.SaveStageProgress(jobID, "ingestion", "completed", &startTime, &endTime, 0, 0)
+	store.SavePipelineLog(jobID, "ingestion", "info", "Ingestion stage completed", map[string]interface{}{
+		"duration_ms": endTime.Sub(startTime).Milliseconds(),
+	})
 }

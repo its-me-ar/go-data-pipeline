@@ -3,8 +3,11 @@ package pipeline
 import (
 	"context"
 	"fmt"
+	"go-data-pipeline/internal/model"
+	"go-data-pipeline/internal/store"
 	"strings"
 	"sync"
+	"time"
 )
 
 // TransformRecords applies transformations to validated records
@@ -229,4 +232,34 @@ func addMetadata(rec GenericRecord) GenericRecord {
 	rec["_pipeline_version"] = "1.0.0"
 	rec["_record_id"] = fmt.Sprintf("%p", &rec) // Simple unique ID
 	return rec
+}
+
+// ------------------- Stage Execution -------------------
+
+// ExecuteTransformationStage executes the complete transformation stage with tracking
+func ExecuteTransformationStage(ctx context.Context, jobID string, job model.PipelineJobSpec, in <-chan GenericRecord, out chan<- GenericRecord, errors chan<- error, tracker interface{}) {
+	startTime := time.Now()
+	store.UpdateJobStatus(jobID, "transforming")
+
+	numWorkers := job.Concurrency.Workers.Transform
+	if numWorkers == 0 {
+		numWorkers = 2 // default
+	}
+
+	// tracker.StartStage("transformation", numWorkers)
+	store.SaveStageProgress(jobID, "transformation", "started", &startTime, nil, 0, 0)
+	store.SavePipelineLog(jobID, "transformation", "info", "Starting transformation stage", map[string]interface{}{
+		"transformations": job.Transformations,
+		"workers":         numWorkers,
+	})
+
+	// Execute transformation using the existing function
+	TransformRecords(ctx, job.Transformations, in, out, errors, numWorkers)
+
+	endTime := time.Now()
+	// tracker.EndStage("transformation", 0) // Record count will be updated by transformation workers
+	store.SaveStageProgress(jobID, "transformation", "completed", &startTime, &endTime, 0, 0)
+	store.SavePipelineLog(jobID, "transformation", "info", "Transformation stage completed", map[string]interface{}{
+		"duration_ms": endTime.Sub(startTime).Milliseconds(),
+	})
 }

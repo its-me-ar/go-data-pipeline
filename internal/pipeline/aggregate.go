@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"go-data-pipeline/internal/model"
+	"go-data-pipeline/internal/store"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 // AggregatedResult represents the result of data aggregation
@@ -47,9 +49,9 @@ func AggregateRecords(ctx context.Context, in <-chan GenericRecord, job model.Pi
 					result := AggregatedResult{
 						GroupKey:    "individual",
 						GroupValue:  fmt.Sprintf("record_%d", count),
-						Metrics:     convertRecordToMetrics(rec),
+						Metrics:     convertRecordToMetrics(model.GenericRecord(rec)),
 						RecordCount: 1,
-						SourceURL:   getSourceURL(rec),
+						SourceURL:   getSourceURL(model.GenericRecord(rec)),
 					}
 					out <- result
 					count++
@@ -90,7 +92,7 @@ func AggregateRecords(ctx context.Context, in <-chan GenericRecord, job model.Pi
 				case <-ctx.Done():
 					return
 				default:
-					worker.processRecord(rec)
+					worker.processRecord(model.GenericRecord(rec))
 					worker.RecordCount++
 
 					if worker.RecordCount%100 == 0 || worker.RecordCount <= 10 {
@@ -153,7 +155,7 @@ func AggregateRecords(ctx context.Context, in <-chan GenericRecord, job model.Pi
 }
 
 // processRecord processes a single record and updates aggregation results
-func (w *AggregationWorker) processRecord(rec GenericRecord) {
+func (w *AggregationWorker) processRecord(rec model.GenericRecord) {
 	// Get group key value
 	groupValue, exists := rec[w.GroupBy]
 	if !exists {
@@ -191,7 +193,7 @@ func (w *AggregationWorker) processRecord(rec GenericRecord) {
 }
 
 // updateMetric updates a specific metric for a record
-func updateMetric(result *AggregatedResult, rec GenericRecord, metric string) {
+func updateMetric(result *AggregatedResult, rec model.GenericRecord, metric string) {
 	switch strings.ToLower(metric) {
 	case "count":
 		// Count is handled by RecordCount
@@ -215,7 +217,7 @@ func updateMetric(result *AggregatedResult, rec GenericRecord, metric string) {
 }
 
 // updateSumMetric calculates sum of numeric fields
-func updateSumMetric(result *AggregatedResult, rec GenericRecord) {
+func updateSumMetric(result *AggregatedResult, rec model.GenericRecord) {
 	for key, value := range rec {
 		if isNumericField(key, value) {
 			if num, ok := convertToFloat(value); ok {
@@ -232,7 +234,7 @@ func updateSumMetric(result *AggregatedResult, rec GenericRecord) {
 }
 
 // updateAverageMetric calculates average of numeric fields
-func updateAverageMetric(result *AggregatedResult, rec GenericRecord) {
+func updateAverageMetric(result *AggregatedResult, rec model.GenericRecord) {
 	for key, value := range rec {
 		if isNumericField(key, value) {
 			if num, ok := convertToFloat(value); ok {
@@ -269,7 +271,7 @@ func updateAverageMetric(result *AggregatedResult, rec GenericRecord) {
 }
 
 // updateMinMetric finds minimum values
-func updateMinMetric(result *AggregatedResult, rec GenericRecord) {
+func updateMinMetric(result *AggregatedResult, rec model.GenericRecord) {
 	for key, value := range rec {
 		if isNumericField(key, value) {
 			if num, ok := convertToFloat(value); ok {
@@ -289,7 +291,7 @@ func updateMinMetric(result *AggregatedResult, rec GenericRecord) {
 }
 
 // updateMaxMetric finds maximum values
-func updateMaxMetric(result *AggregatedResult, rec GenericRecord) {
+func updateMaxMetric(result *AggregatedResult, rec model.GenericRecord) {
 	for key, value := range rec {
 		if isNumericField(key, value) {
 			if num, ok := convertToFloat(value); ok {
@@ -309,7 +311,7 @@ func updateMaxMetric(result *AggregatedResult, rec GenericRecord) {
 }
 
 // updateFirstMetric stores first occurrence of values
-func updateFirstMetric(result *AggregatedResult, rec GenericRecord) {
+func updateFirstMetric(result *AggregatedResult, rec model.GenericRecord) {
 	for key, value := range rec {
 		firstKey := "first_" + key
 		if _, exists := result.Metrics[firstKey]; !exists {
@@ -319,7 +321,7 @@ func updateFirstMetric(result *AggregatedResult, rec GenericRecord) {
 }
 
 // updateLastMetric stores last occurrence of values
-func updateLastMetric(result *AggregatedResult, rec GenericRecord) {
+func updateLastMetric(result *AggregatedResult, rec model.GenericRecord) {
 	for key, value := range rec {
 		lastKey := "last_" + key
 		result.Metrics[lastKey] = value
@@ -327,7 +329,7 @@ func updateLastMetric(result *AggregatedResult, rec GenericRecord) {
 }
 
 // updateCustomMetric handles custom metric calculations
-func updateCustomMetric(result *AggregatedResult, rec GenericRecord, metric string) {
+func updateCustomMetric(result *AggregatedResult, rec model.GenericRecord, metric string) {
 	// Try to find a field that matches the metric name
 	for key, value := range rec {
 		if strings.EqualFold(key, metric) {
@@ -352,7 +354,7 @@ func updateCustomMetric(result *AggregatedResult, rec GenericRecord, metric stri
 
 // Helper functions
 
-func convertRecordToMetrics(rec GenericRecord) map[string]interface{} {
+func convertRecordToMetrics(rec model.GenericRecord) map[string]interface{} {
 	metrics := make(map[string]interface{})
 	for key, value := range rec {
 		metrics[key] = value
@@ -360,14 +362,14 @@ func convertRecordToMetrics(rec GenericRecord) map[string]interface{} {
 	return metrics
 }
 
-func getSourceURL(rec GenericRecord) string {
+func getSourceURL(rec model.GenericRecord) string {
 	if sourceURL, ok := rec["SourceURL"].(string); ok {
 		return sourceURL
 	}
 	return ""
 }
 
-func getRecordKeys(rec GenericRecord) []string {
+func getRecordKeys(rec model.GenericRecord) []string {
 	keys := make([]string, 0, len(rec))
 	for key := range rec {
 		keys = append(keys, key)
@@ -503,4 +505,50 @@ func SortAggregatedResults(results []AggregatedResult, sortBy string, ascending 
 	})
 
 	return results
+}
+
+// ------------------- Stage Execution -------------------
+
+// ExecuteAggregationStage executes the complete aggregation stage with tracking
+func ExecuteAggregationStage(ctx context.Context, jobID string, job model.PipelineJobSpec, in <-chan GenericRecord, out chan<- AggregatedResult, errors chan<- error, tracker interface{}) {
+	startTime := time.Now()
+	store.UpdateJobStatus(jobID, "aggregating")
+
+	numWorkers := job.Concurrency.Workers.Aggregation
+	if numWorkers == 0 {
+		numWorkers = 2 // default
+	}
+
+	// tracker.StartStage("aggregation", numWorkers)
+	store.SaveStageProgress(jobID, "aggregation", "started", &startTime, nil, 0, 0)
+	store.SavePipelineLog(jobID, "aggregation", "info", "Starting aggregation stage", map[string]interface{}{
+		"group_by": job.Aggregation.GroupBy,
+		"metrics":  job.Aggregation.Metrics,
+		"workers":  numWorkers,
+	})
+
+	// Execute aggregation using the existing function
+	aggregatedResults := AggregateRecords(ctx, in, job, numWorkers)
+
+	// Forward results to the output channel
+	resultCount := 0
+	for result := range aggregatedResults {
+		select {
+		case <-ctx.Done():
+			store.SavePipelineLog(jobID, "aggregation", "warning", "Aggregation cancelled", map[string]interface{}{
+				"results_processed": resultCount,
+			})
+			return
+		case out <- result:
+			resultCount++
+		}
+	}
+
+	endTime := time.Now()
+	// tracker.EndStage("aggregation", int64(resultCount))
+	store.SaveStageProgress(jobID, "aggregation", "completed", &startTime, &endTime, resultCount, 0)
+	store.SavePipelineLog(jobID, "aggregation", "info", "Aggregation stage completed", map[string]interface{}{
+		"results_count": resultCount,
+		"duration_ms":   endTime.Sub(startTime).Milliseconds(),
+	})
 }
